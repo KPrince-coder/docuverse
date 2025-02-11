@@ -1,0 +1,94 @@
+/* General Styles */
+body {
+    font-family: 'Roboto', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #635BFF; /* Match primary color */
+    font-weight: bold;
+}
+
+/* Sidebar Styling */
+.sidebar .sidebar-content {
+    background-color: #161A1D !important; /* Darker sidebar */
+    border-right: 1px solid #635BFF; /* Accent border */
+}
+
+/* Buttons */
+.stButton > button {
+    background-color: #635BFF !important;
+    border: none !important;
+    color: white !important;
+    font-weight: bold;
+    border-radius: 8px;
+    padding: 10px 20px;
+    transition: all 0.3s ease;
+}
+
+.stButton > button:hover {
+    background-color: #4A43DB !important; /* Darker purple on hover */
+    transform: scale(1.05); /* Slight zoom effect */
+}
+
+/* Input Fields */
+.stTextInput > div > div > input {
+    background-color: #262730 !important;
+    color: white !important;
+    border: 1px solid #635BFF !important;
+    border-radius: 8px;
+    padding: 10px;
+}
+
+/* File Uploader */
+.stFileUploader > div > div > div {
+    background-color: #262730 !important;
+    border: 1px dashed #635BFF !important;
+    border-radius: 8px;
+}
+
+/* Cards */
+[data-testid="stVerticalBlock"] {
+    background-color: #262730;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.response-box {
+    animation: fadeIn 0.5s ease-in-out;
+    background-color: #262730;
+    border-radius: 10px;
+    padding: 20px;
+    margin-top: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Loading Spinner */
+.loader {
+    border: 4px solid #262730; /* Light gray outer circle */
+    border-top: 4px solid #635BFF; /* Vibrant purple for the spinning part */
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-text {
+    text-align: center;
+    color: #635BFF;
+    font-size: 16px;
+    margin-top: 10px;
+}
