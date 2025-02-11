@@ -1,0 +1,14 @@
+[theme]
+primaryColor = "#635BFF"  # Vibrant purple for buttons and highlights
+backgroundColor = "#0E1117"  # Dark mode background
+secondaryBackgroundColor = "#262730"  # Slightly lighter dark gray for cards
+textColor = "#FFFFFF"  # White text for contrast
+font = "sans serif"  # Clean, modern font
+
+[server]
+headless = false  # Enable browser UI
+enableCORS = true  # Allow cross-origin requests
+enableXsrfProtection = true  # Protect against CSRF attacks
+
+[ui]
+hideTopBar = true  # Hide the default Streamlit top bar
