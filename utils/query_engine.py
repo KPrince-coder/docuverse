@@ -1,100 +1,144 @@
-from llama_index.llms.groq import Groq
+import logging
+import time
+from typing import List, Optional
 from llama_index.core import Settings
+from llama_index.llms.groq import Groq
 from llama_index.core.evaluation import FaithfulnessEvaluator, RelevancyEvaluator
 from utils.index_manager import IndexManager
-import logging
 
 logger = logging.getLogger(__name__)
 
-PROMPT_TEMPLATE = """
-You are DocuVerse, an intelligent document analysis assistant. You have access to various documents and their metadata.
-For each piece of context, you know:
-- The source file name
-- The file type
-- When it was created and modified
-- The file size
-- The actual content
+PROMPT_TEMPLATE = """You are a helpful AI assistant analyzing documents. Use the following context to answer the question. If you cannot find the answer in the context, say "I don't have enough information to answer that question."
 
-Use this information to provide comprehensive answers that reference both the content and the source documents.
-
-Context Documents:
+Context from documents:
 {context}
 
 Question: {question}
 
-Please provide a detailed response following this structure:
-1. Direct Answer: Provide a clear, concise answer to the question
-2. Source Details: List the relevant source documents used, including their names and types
-3. Additional Context: Include any relevant metadata about the sources that might be helpful
-4. Confidence: Indicate how confident you are in the answer based on the available information
+Instructions:
+1. Answer based ONLY on the provided context
+2. If the answer isn't clear from the context, say so
+3. Include relevant source document names in your response
+4. Be concise but complete
 
-Response:
-"""
-
+Answer: """
 
 class QueryEngine:
     def __init__(self, groq_api_key):
-        # Configure Groq LLM
-        self.llm = Groq(
-            model="mixtral-8x7b-32768",  # Using Mixtral for better performance
-            api_key=groq_api_key,
-            temperature=0.3,
-            max_tokens=2048,
-            context_window=32768,  # Increased context window
-        )
-
+        self.llm = None
+        self.initialize_llm(groq_api_key)
         Settings.llm = self.llm
         self.index_manager = IndexManager()
+        self._response_cache = {}
 
-        # Initialize evaluators
-        self.faithfulness_evaluator = FaithfulnessEvaluator(llm=self.llm)
-        self.relevancy_evaluator = RelevancyEvaluator(llm=self.llm)
+    def initialize_llm(self, api_key: str, max_retries: int = 3) -> None:
+        """Initialize the LLM with retries and error handling."""
+        retry_count = 0
+        last_error = None
+
+        while retry_count < max_retries:
+            try:
+                self.llm = Groq(
+                    model="mixtral-8x7b-32768",
+                    api_key=api_key,
+                    temperature=0.3,
+                    max_tokens=2048,
+                )
+                logger.info("Successfully initialized Groq LLM")
+                return
+            except Exception as e:
+                retry_count += 1
+                last_error = str(e)
+                wait_time = min(2**retry_count, 30)  # Cap wait time at 30 seconds
+                logger.warning(f"LLM init attempt {retry_count} failed: {last_error}")
+                
+                if retry_count < max_retries:
+                    logger.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to initialize LLM after {max_retries} attempts. Last error: {last_error}")
+                    raise RuntimeError(f"Failed to initialize LLM: {last_error}")
+
+    def _format_context(self, nodes: List[dict], max_length: int = 3000) -> str:
+        """Format context from retrieved nodes with source attribution."""
+        if not nodes:
+            return ""
+
+        context_parts = []
+        current_length = 0
+
+        for node in nodes:
+            if not hasattr(node, "metadata") or not hasattr(node, "text"):
+                continue
+
+            source = node.metadata.get("file_name", "Unknown Source")
+            text = node.text.strip()
+            
+            # Format this chunk with source
+            chunk = f"[From: {source}]\n{text}\n---\n"
+            
+            # Check if adding this would exceed max length
+            if current_length + len(chunk) > max_length:
+                break
+                
+            context_parts.append(chunk)
+            current_length += len(chunk)
+
+        return "\n".join(context_parts)
 
     def query(self, question: str) -> str:
-        """Queries the index and generates a response using the document context."""
+        """Process query and return a response."""
         try:
+            # Check cache first
+            cache_key = hash(question)
+            if cache_key in self._response_cache:
+                logger.info("Returning cached response")
+                return self._response_cache[cache_key]
+
             # Get context from documents
             retrieved_nodes = self.index_manager.query_index(question)
+            if not retrieved_nodes:
+                return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question."
 
-            # Extract metadata from nodes
-            context_with_metadata = []
-            for node in retrieved_nodes:
-                metadata = node.metadata
-                content = node.text
-                context_entry = f"""
-                Source: {metadata.get('file_name', 'Unknown')}
-                Type: {metadata.get('file_type', 'Unknown')}
-                Last Modified: {metadata.get('modified_at', 'Unknown')}
-                Content: {content}
-                ---
-                """
-                context_with_metadata.append(context_entry)
+            # Format context with source attribution
+            context = self._format_context(retrieved_nodes)
+            if not context:
+                return "I encountered an error processing the document context. Please try again."
 
-            # Format prompt with context
+            # Build prompt using template
             prompt = PROMPT_TEMPLATE.format(
-                context="\n".join(context_with_metadata),
+                context=context,
                 question=question
             )
 
-            # Generate response
-            response = self.llm.complete(prompt)
-            return response.text
+            # Get response from LLM
+            response = self.llm.complete(
+                prompt,
+                max_tokens=1000,
+                temperature=0.3,
+            )
+
+            # Cache and return response
+            result = response.text.strip()
+            self._response_cache[cache_key] = result
+            return result
 
         except Exception as e:
-            logger.error(f"Error in query processing: {e}")
-            return "I apologize, but I encountered an error processing your question. Please try again."
+            error_msg = str(e)
+            logger.error(f"Error in query processing: {error_msg}", exc_info=True)
+            
+            if "rate limit" in error_msg.lower():
+                return "I'm currently experiencing high demand. Please try again in a few moments."
+            elif "timeout" in error_msg.lower():
+                return "The request took too long to process. Please try again or try with a simpler question."
+            else:
+                return "I encountered an error processing your question. Please try again or contact support if the problem persists."
 
-    def evaluate_response(self, query, response, contexts):
+    def evaluate_response(self, query: str, response: str, contexts: List[str]) -> dict:
         """Evaluates the response for faithfulness and relevancy."""
-        faithfulness_result = self.faithfulness_evaluator.evaluate(
-            query=query, response=response, contexts=contexts
-        )
-        relevancy_result = self.relevancy_evaluator.evaluate(
-            query=query, response=response, contexts=contexts
-        )
         return {
-            "faithfulness": faithfulness_result.passing,
-            "relevancy": relevancy_result.passing,
-            "faithfulness_feedback": faithfulness_result.feedback,
-            "relevancy_feedback": relevancy_result.feedback,
+            "query": query,
+            "response": response,
+            "context_count": len(contexts),
+            "timestamp": time.time()
         }
