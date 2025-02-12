@@ -128,11 +128,16 @@ with tab1:
             with st.status("Processing files..."):
                 for uploaded_file in uploaded_files:
                     file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    # Track the file in the database
-                    db.add_file(selected_session_id, file_path, uploaded_file.name)
-                    st.write(f"Processing: {uploaded_file.name}")
+                    
+                    # Try to add file to database first
+                    if db.add_file(selected_session_id, file_path, uploaded_file.name):
+                        # Only write file to disk if database insertion was successful
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        st.write(f"Processing: {uploaded_file.name}")
+                    else:
+                        st.warning(f"File {uploaded_file.name} already exists in this conversation. Skipping...")
+                        continue
 
                 # Rebuild the index after uploading new files
                 query_engine.index_manager.build_index()
@@ -143,13 +148,21 @@ with tab1:
         files = db.get_conversation_files(selected_session_id)
         if files:
             st.subheader("📄 Uploaded Files")
+            # Use a set to track unique file names
+            seen_files = set()
             for file_path, file_name in files:
+                if file_name in seen_files:
+                    continue
+                seen_files.add(file_name)
+                
                 col1, col2 = st.columns([6, 1])
                 with col1:
                     st.text(f"• {file_name}")
                 with col2:
-                    if st.button("🗑️", key=f"delete_file_{file_name}"):
-                        if st.button("Confirm deletion?", key=f"confirm_{file_name}"):
+                    # Create a unique key using both session_id and file_path
+                    unique_key = f"{selected_session_id}_{file_path}".replace('\\', '_').replace('/', '_')
+                    if st.button("🗑️", key=f"delete_file_{unique_key}"):
+                        if st.button("Confirm deletion?", key=f"confirm_{unique_key}"):
                             if delete_file(file_path, file_name, selected_session_id):
                                 st.success(f"Deleted {file_name}")
                                 st.rerun()
