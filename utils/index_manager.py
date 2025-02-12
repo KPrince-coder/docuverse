@@ -11,6 +11,7 @@ from llama_index.readers.json import JSONReader
 import os
 from typing import Dict, Any
 import logging
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,12 +20,37 @@ logger = logging.getLogger(__name__)
 
 def get_file_metadata(path: str) -> Dict[str, Any]:
     """Get metadata for a file."""
+    # Get file stats
+    stats = os.stat(path)
+    
+    # Get file extension and determine file type category
+    ext = os.path.splitext(path)[1][1:].lower()
+    file_type_categories = {
+        'text': ['txt', 'md'],
+        'document': ['pdf', 'docx'],
+        'presentation': ['ppt', 'pptm', 'pptx'],
+        'spreadsheet': ['csv'],
+        'ebook': ['epub'],
+        'email': ['mbox'],
+        'notebook': ['ipynb'],
+        'korean_doc': ['hwp'],
+        'data': ['json']
+    }
+    
+    file_category = next(
+        (category for category, exts in file_type_categories.items() if ext in exts),
+        'other'
+    )
+    
     return {
         "file_name": os.path.basename(path),
-        "file_type": os.path.splitext(path)[1][1:],
-        "file_size": os.path.getsize(path),
-        "created_at": os.path.getctime(path),
-        "modified_at": os.path.getmtime(path),
+        "file_type": ext,
+        "file_category": file_category,
+        "file_size": stats.st_size,
+        "file_size_formatted": f"{stats.st_size / 1024:.1f} KB",
+        "created_at": datetime.fromtimestamp(stats.st_ctime).isoformat(),
+        "modified_at": datetime.fromtimestamp(stats.st_mtime).isoformat(),
+        "is_binary": ext not in ['txt', 'md', 'csv', 'json'],
     }
 
 
@@ -73,6 +99,7 @@ class IndexManager:
                     ".hwp",
                     ".ipynb",
                     ".mbox",
+                    ".json",
                 ],
                 file_metadata=get_file_metadata,
                 filename_as_id=True,  # Use filename as document ID
@@ -147,23 +174,34 @@ class IndexManager:
             print(f"Error loading index: {e}")
             self.build_index()
 
-    def query_index(self, query: str):
-        """Queries the index and returns the response with context."""
+    def query_index(self, query_text: str, similarity_top_k: int = 3):
+        """
+        Query the index with improved metadata handling.
+        Returns the most relevant nodes with their metadata.
+        """
         if not self.index:
-            raise ValueError("Index not initialized")
-
-        # Configure query engine for better retrieval
-        query_engine = self.index.as_query_engine(
-            similarity_top_k=3,
-            response_mode="compact",
-            llm=Settings.llm,
-            verbose=True,  # Enable verbose mode for debugging
-        )
+            logger.warning("No index available for querying")
+            return []
 
         try:
-            response = query_engine.query(query)
-            logger.info(f"Query executed successfully: {query}")
-            return response
+            # Retrieve relevant nodes
+            query_engine = self.index.as_query_engine(
+                similarity_top_k=similarity_top_k,
+                response_mode="no_text",  # We'll handle the response formatting
+            )
+            response = query_engine.query(query_text)
+            
+            # Get source nodes with metadata
+            source_nodes = response.source_nodes
+            
+            # Log retrieved documents for debugging
+            logger.info(f"Retrieved {len(source_nodes)} relevant documents")
+            for node in source_nodes:
+                logger.info(f"Document: {node.metadata.get('file_name')} "
+                          f"(Score: {node.score:.3f})")
+            
+            return source_nodes
+
         except Exception as e:
-            logger.error(f"Error executing query: {e}")
-            raise
+            logger.error(f"Error querying index: {e}")
+            return []

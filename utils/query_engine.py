@@ -7,15 +7,28 @@ import logging
 logger = logging.getLogger(__name__)
 
 PROMPT_TEMPLATE = """
-You are an intelligent assistant tasked with answering questions based on the provided documents. 
-Use the following context to answer the question. If the answer cannot be found in the context, 
-respond with "I don't know."
+You are DocuVerse, an intelligent document analysis assistant. You have access to various documents and their metadata.
+For each piece of context, you know:
+- The source file name
+- The file type
+- When it was created and modified
+- The file size
+- The actual content
 
-Context: {context}
+Use this information to provide comprehensive answers that reference both the content and the source documents.
+
+Context Documents:
+{context}
 
 Question: {question}
 
-Based on the provided documents, here's the answer:
+Please provide a detailed response following this structure:
+1. Direct Answer: Provide a clear, concise answer to the question
+2. Source Details: List the relevant source documents used, including their names and types
+3. Additional Context: Include any relevant metadata about the sources that might be helpful
+4. Confidence: Indicate how confident you are in the answer based on the available information
+
+Response:
 """
 
 
@@ -27,6 +40,7 @@ class QueryEngine:
             api_key=groq_api_key,
             temperature=0.3,
             max_tokens=2048,
+            context_window=32768,  # Increased context window
         )
 
         Settings.llm = self.llm
@@ -40,14 +54,26 @@ class QueryEngine:
         """Queries the index and generates a response using the document context."""
         try:
             # Get context from documents
-            retrieved_context = self.index_manager.query_index(question)
+            retrieved_nodes = self.index_manager.query_index(question)
 
-            # Log retrieved context for debugging
-            logger.info(f"Retrieved context length: {len(str(retrieved_context))}")
+            # Extract metadata from nodes
+            context_with_metadata = []
+            for node in retrieved_nodes:
+                metadata = node.metadata
+                content = node.text
+                context_entry = f"""
+                Source: {metadata.get('file_name', 'Unknown')}
+                Type: {metadata.get('file_type', 'Unknown')}
+                Last Modified: {metadata.get('modified_at', 'Unknown')}
+                Content: {content}
+                ---
+                """
+                context_with_metadata.append(context_entry)
 
             # Format prompt with context
             prompt = PROMPT_TEMPLATE.format(
-                context=retrieved_context, question=question
+                context="\n".join(context_with_metadata),
+                question=question
             )
 
             # Generate response

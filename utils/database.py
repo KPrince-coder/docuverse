@@ -34,15 +34,16 @@ class ConversationDB:
             )
         """)
 
-        # Add files table
+        # Add files table with unique constraint
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT,
-                file_path TEXT,
+                file_path TEXT UNIQUE,
                 file_name TEXT,
                 uploaded_at TEXT,
-                FOREIGN KEY(session_id) REFERENCES conversations(session_id)
+                FOREIGN KEY(session_id) REFERENCES conversations(session_id),
+                UNIQUE(session_id, file_name)
             )
         """)
         self.conn.commit()
@@ -75,15 +76,34 @@ class ConversationDB:
 
     def add_file(self, session_id, file_path, file_name):
         """Tracks a file associated with a conversation."""
-        timestamp = datetime.now().isoformat()
-        self.cursor.execute(
-            """
-            INSERT INTO files (session_id, file_path, file_name, uploaded_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (session_id, file_path, file_name, timestamp),
-        )
-        self.conn.commit()
+        try:
+            # Check if file already exists
+            self.cursor.execute(
+                "SELECT COUNT(*) FROM files WHERE session_id = ? AND file_name = ?",
+                (session_id, file_name)
+            )
+            if self.cursor.fetchone()[0] > 0:
+                logger.warning(f"File {file_name} already exists in session {session_id}")
+                return False
+                
+            timestamp = datetime.now().isoformat()
+            self.cursor.execute(
+                """
+                INSERT INTO files (session_id, file_path, file_name, uploaded_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (session_id, file_path, file_name, timestamp),
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            logger.warning(f"File {file_name} already exists in session {session_id}")
+            self.conn.rollback()
+            return False
+        except Exception as e:
+            logger.error(f"Error adding file to database: {e}")
+            self.conn.rollback()
+            return False
 
     def get_conversations(self):
         """Retrieves all conversations."""
