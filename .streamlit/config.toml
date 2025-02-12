@@ -6,6 +6,7 @@ textColor = "#262730"  # Dark gray text for contrast
 font = "sans serif"  # Clean, modern font
 
 [server]
+runOnSave = true  # Turn off automatic rerun on save
 headless = false  # Enable browser UI
 enableCORS = true  # Allow cross-origin requests
 enableXsrfProtection = true  # Protect against CSRF attacks
