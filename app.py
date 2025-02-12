@@ -140,7 +140,7 @@ with tab1:
 
     # Show current conversation's files
     if selected_session_id:
-        files = db.get_files(selected_session_id)
+        files = db.get_conversation_files(selected_session_id)
         if files:
             st.subheader("📄 Uploaded Files")
             for file_path, file_name in files:
