@@ -40,6 +40,35 @@ st.markdown(
     font-size: 0.9em;
     margin-top: 5px;
 }
+
+
+.sidebar-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 17rem;  /* Match Streamlit's sidebar width */
+    background-color: rgb(240, 242, 246);
+    padding: 1rem 0;
+    text-align: center;
+    border-top: 1px solid #ddd;
+    z-index: 999;
+    font-size: 0.8em;
+    margin-bottom: 3rem;  /* Add space for Streamlit's bottom bar */
+}
+
+.sidebar-footer hr {
+    margin: 0.5rem 1rem;
+    border: none;
+    border-top: 1px solid #ddd;
+}
+
+.sidebar-footer p {
+    margin: 0.5rem 0;
+    opacity: 0.7;
+}
+.main-content {
+    margin-bottom: 80px;  /* Add space for footer */
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -114,6 +143,9 @@ if selected_session_id and selected_session_id not in query_engines:
 
 # Main App
 st.title("🚀 DocuVerse: Your Document Intelligence Assistant")
+
+# Wrap main content in a div with margin-bottom
+st.markdown('<div class="main-content">', unsafe_allow_html=True)
 
 tab1, tab2 = st.tabs(["Upload & Chat", "History"])
 
@@ -198,41 +230,7 @@ with tab1:
                             else:
                                 st.error(f"Failed to delete {file_name}")
 
-    # Chat section
-    # st.subheader("💬 Chat")
-    # if not selected_session_id:
-    #     st.info("Please start a new conversation using the sidebar.")
-    # else:
-    #     # Display chat history
-    #     messages = db.get_messages(selected_session_id)
-    #     for role, content, timestamp in messages:
-    #         with st.chat_message(role):
-    #             st.write(content)
-    #             st.caption(f"Sent at {timestamp[:16]}")
-
-    #     # Chat input
-    #     if question := st.chat_input("Ask about your documents..."):
-    #         if not os.listdir(UPLOAD_DIR):
-    #             st.error("Please upload some documents first!")
-    #         else:
-    #             # Add user message to chat
-    #             with st.chat_message("user"):
-    #                 st.write(question)
-
-    #             # Get AI response with context
-    #             with st.chat_message("assistant"):
-    #                 with st.spinner("Thinking..."):
-    #                     query_engine = query_engines.get(selected_session_id)
-    #                     if query_engine:
-    #                         response = query_engine.query(question)
-    #                         st.write(response)
-    #                     else:
-    #                         st.error("Session not initialized properly. Please try refreshing the page.")
-
-    #             # Store the conversation
-    #             db.add_message(selected_session_id, "user", question)
-    #             db.add_message(selected_session_id, "assistant", str(response))
-
+   
 
 
     # Chat section
@@ -327,13 +325,21 @@ with tab2:
                     db.delete_conversation(session_id)
                     st.rerun()
 
-# Footer
-st.markdown(
+# Close the main-content div
+st.markdown('</div>', unsafe_allow_html=True)
+
+# Sidebar Footer
+
+# Add some empty space in the sidebar to prevent content overlap
+st.sidebar.markdown("<br>" * 5, unsafe_allow_html=True)
+st.sidebar.markdown(
     """
-    <hr>
-    <p style="text-align:center">
-        Made with ❤️ by DocuVerse Team
-    </p>
+    <div class="sidebar-footer">
+        <hr>
+        <p>
+            Made with ❤️ by DocuVerse Team
+        </p>
+    </div>
     """,
     unsafe_allow_html=True,
 )
