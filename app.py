@@ -21,7 +21,6 @@ st.set_page_config(
 st.markdown(
     """
 <style>
-/* Chat container styles */
 .conversation-box {
     border: 1px solid #ddd;
     border-radius: 8px;
@@ -29,64 +28,15 @@ st.markdown(
     margin: 10px 0;
     background-color: #f8f9fa;
 }
-
 .conversation-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
-
 .file-list {
     color: #666;
     font-size: 0.9em;
     margin-top: 5px;
-}
-
-/* Footer styles */
-.footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: white;
-    padding: 1rem;
-    border-top: 1px solid #ddd;
-    z-index: 100;
-}
-
-/* Main content area styles */
-.main-content {
-    margin-bottom: 120px; /* Add space for the fixed footer */
-    padding-bottom: 2rem;
-}
-
-/* Chat message styles */
-.chat-message {
-    margin-bottom: 1rem;
-    padding: 1rem;
-    border-radius: 8px;
-}
-
-.user-message {
-    background-color: #e3f2fd;
-    margin-left: 20%;
-}
-
-.assistant-message {
-    background-color: #f5f5f5;
-    margin-right: 20%;
-}
-
-/* Ensure chat input is at the bottom */
-div[data-testid="stForm"] {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: white;
-    padding: 1rem;
-    border-top: 1px solid #ddd;
-    z-index: 99;
 }
 </style>
 """,
@@ -177,61 +127,36 @@ with tab1:
             for _, file_name in files:
                 st.text(f"• {file_name}")
 
-    # Create a container for the main content
-    main_content = st.container()
+    # Chat section
+    st.subheader("💬 Chat")
+    if not selected_session_id:
+        st.info("Please start a new conversation using the sidebar.")
+    else:
+        # Display chat history
+        messages = db.get_messages(selected_session_id)
+        for role, content, timestamp in messages:
+            with st.chat_message(role):
+                st.write(content)
+                st.caption(f"Sent at {timestamp[:16]}")
 
-    with main_content:
-        # Display conversation history
-        if selected_session_id:
-            messages = db.get_messages(selected_session_id)
-            st.markdown('<div class="main-content">', unsafe_allow_html=True)
-            for role, content, timestamp in messages:
-                message_class = "user-message" if role == "user" else "assistant-message"
-                st.markdown(
-                    f'<div class="chat-message {message_class}">{content}</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Chat input
+        if question := st.chat_input("Ask about your documents..."):
+            if not os.listdir(UPLOAD_DIR):
+                st.error("Please upload some documents first!")
+            else:
+                # Add user message to chat
+                with st.chat_message("user"):
+                    st.write(question)
 
-    # Create a form for the chat input
-    with st.form(key="chat_form", clear_on_submit=True):
-        user_input = st.text_area("Type your message:", key="user_input", height=100)
-        col1, col2 = st.columns([0.85, 0.15])
-        with col1:
-            uploaded_file = st.file_uploader(
-                "Upload a document",
-                type=SUPPORTED_FILE_TYPES,
-                help="Upload a document to chat with",
-            )
-        with col2:
-            submit_button = st.form_submit_button("Send")
+                # Get AI response with context
+                with st.chat_message("assistant"):
+                    with st.spinner("Thinking..."):
+                        response = query_engine.query(question)
+                        st.write(response)
 
-        if submit_button and user_input:
-            if not selected_session_id:
-                selected_session_id = db.create_conversation()
-
-            # Handle file upload
-            if uploaded_file:
-                file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                db.add_file(selected_session_id, file_path, uploaded_file.name)
-                query_engine.index_manager.build_index()  # Rebuild index with new file
-
-            # Store user message
-            db.add_message(selected_session_id, "user", user_input)
-
-            try:
-                # Get response from query engine
-                response = query_engine.query(user_input)
-                # Store assistant response
+                # Store the conversation
+                db.add_message(selected_session_id, "user", question)
                 db.add_message(selected_session_id, "assistant", str(response))
-            except Exception as e:
-                error_message = f"Error: {str(e)}"
-                st.error(error_message)
-                db.add_message(selected_session_id, "assistant", error_message)
-
-            st.rerun()
 
 with tab2:
     st.header("📖 Conversation History")
