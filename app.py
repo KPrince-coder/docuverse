@@ -199,39 +199,87 @@ with tab1:
                                 st.error(f"Failed to delete {file_name}")
 
     # Chat section
-    st.subheader("💬 Chat")
-    if not selected_session_id:
-        st.info("Please start a new conversation using the sidebar.")
-    else:
-        # Display chat history
+    # st.subheader("💬 Chat")
+    # if not selected_session_id:
+    #     st.info("Please start a new conversation using the sidebar.")
+    # else:
+    #     # Display chat history
+    #     messages = db.get_messages(selected_session_id)
+    #     for role, content, timestamp in messages:
+    #         with st.chat_message(role):
+    #             st.write(content)
+    #             st.caption(f"Sent at {timestamp[:16]}")
+
+    #     # Chat input
+    #     if question := st.chat_input("Ask about your documents..."):
+    #         if not os.listdir(UPLOAD_DIR):
+    #             st.error("Please upload some documents first!")
+    #         else:
+    #             # Add user message to chat
+    #             with st.chat_message("user"):
+    #                 st.write(question)
+
+    #             # Get AI response with context
+    #             with st.chat_message("assistant"):
+    #                 with st.spinner("Thinking..."):
+    #                     query_engine = query_engines.get(selected_session_id)
+    #                     if query_engine:
+    #                         response = query_engine.query(question)
+    #                         st.write(response)
+    #                     else:
+    #                         st.error("Session not initialized properly. Please try refreshing the page.")
+
+    #             # Store the conversation
+    #             db.add_message(selected_session_id, "user", question)
+    #             db.add_message(selected_session_id, "assistant", str(response))
+
+
+
+    # Chat section
+st.subheader("💬 Chat")
+if not selected_session_id:
+    st.info("Please start a new conversation using the sidebar.")
+else:
+    # Create a container for all chat content
+    chat_container = st.container()
+    
+    # Display existing messages first
+    with chat_container:
         messages = db.get_messages(selected_session_id)
         for role, content, timestamp in messages:
             with st.chat_message(role):
                 st.write(content)
                 st.caption(f"Sent at {timestamp[:16]}")
-
-        # Chat input
-        if question := st.chat_input("Ask about your documents..."):
-            if not os.listdir(UPLOAD_DIR):
-                st.error("Please upload some documents first!")
-            else:
-                # Add user message to chat
+    
+    # Then handle new messages
+    question = st.chat_input("Ask about your documents...")
+    if question:
+        if not os.listdir(UPLOAD_DIR):
+            st.error("Please upload some documents first!")
+        else:
+            with chat_container:
+                # Show user message
                 with st.chat_message("user"):
                     st.write(question)
-
-                # Get AI response with context
+                
+                # Get and show AI response
                 with st.chat_message("assistant"):
                     with st.spinner("Thinking..."):
                         query_engine = query_engines.get(selected_session_id)
                         if query_engine:
                             response = query_engine.query(question)
                             st.write(response)
+                            
+                            # Store both messages
+                            db.add_message(selected_session_id, "user", question)
+                            db.add_message(selected_session_id, "assistant", response)
+                            
+                            # Rerun to update chat history
+                            st.rerun()
                         else:
                             st.error("Session not initialized properly. Please try refreshing the page.")
 
-                # Store the conversation
-                db.add_message(selected_session_id, "user", question)
-                db.add_message(selected_session_id, "assistant", str(response))
+
 
 with tab2:
     st.header("📖 Conversation History")
