@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+import shutil
+import logging
 from datetime import datetime
 from utils.database import ConversationDB
 from utils.query_engine import QueryEngine
@@ -47,7 +49,7 @@ st.markdown(
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
 # Initialize Query Engine and Database
-query_engine = QueryEngine(os.getenv("GROQ_API_KEY"))
+query_engines = {}
 db = ConversationDB()
 
 # Create upload directory if it doesn't exist
@@ -84,8 +86,31 @@ else:
     selected_session_id = None
 
 if st.sidebar.button("Start New Conversation"):
+    # Clean up old session resources if they exist
+    if selected_session_id:
+        try:
+            # Remove session-specific storage and cache
+            session_storage = f"./storage/{selected_session_id}"
+            session_cache = f"./cache/{selected_session_id}"
+            if os.path.exists(session_storage):
+                shutil.rmtree(session_storage)
+            if os.path.exists(session_cache):
+                shutil.rmtree(session_cache)
+            # Remove session's query engine
+            if selected_session_id in query_engines:
+                del query_engines[selected_session_id]
+        except Exception as e:
+            logging.error(f"Error cleaning up session {selected_session_id}: {e}")
+    
     selected_session_id = db.create_conversation()
     st.rerun()
+
+# Get or create query engine for current session
+if selected_session_id and selected_session_id not in query_engines:
+    query_engines[selected_session_id] = QueryEngine(
+        os.getenv("GROQ_API_KEY"),
+        session_id=selected_session_id
+    )
 
 # Main App
 st.title("🚀 DocuVerse: Your Document Intelligence Assistant")
@@ -104,7 +129,9 @@ def delete_file(file_path: str, file_name: str, session_id: str):
         db.delete_file(session_id, file_path)
 
         # Rebuild index after file deletion
-        query_engine.index_manager.build_index()
+        query_engine = query_engines.get(session_id)
+        if query_engine:
+            query_engine.index_manager.build_index()
         return True
     except Exception as e:
         st.error(f"Error deleting file: {e}")
@@ -140,7 +167,9 @@ with tab1:
                         continue
 
                 # Rebuild the index after uploading new files
-                query_engine.index_manager.build_index()
+                query_engine = query_engines.get(selected_session_id)
+                if query_engine:
+                    query_engine.index_manager.build_index()
                 st.success("Files processed successfully!")
 
     # Show current conversation's files
@@ -193,8 +222,12 @@ with tab1:
                 # Get AI response with context
                 with st.chat_message("assistant"):
                     with st.spinner("Thinking..."):
-                        response = query_engine.query(question)
-                        st.write(response)
+                        query_engine = query_engines.get(selected_session_id)
+                        if query_engine:
+                            response = query_engine.query(question)
+                            st.write(response)
+                        else:
+                            st.error("Session not initialized properly. Please try refreshing the page.")
 
                 # Store the conversation
                 db.add_message(selected_session_id, "user", question)

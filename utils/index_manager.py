@@ -3,13 +3,11 @@ import time
 import logging
 import pickle
 import shutil
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
-import requests.exceptions
 from llama_index.core import (
     SimpleDirectoryReader,
     StorageContext,
@@ -122,11 +120,12 @@ def get_file_metadata(path: str) -> Dict[str, Any]:
 class IndexManager:
     """Main index management class"""
 
-    def __init__(self, data_dir: str = "data/uploads"):
+    def __init__(self, data_dir: str = "data/uploads", session_id: str = None):
         # Configuration paths
         self.data_dir = data_dir
-        self.storage_dir = "./storage"
-        self.cache_dir = "./cache"
+        self.session_id = session_id
+        self.storage_dir = f"./storage/{session_id}" if session_id else "./storage"
+        self.cache_dir = f"./cache/{session_id}" if session_id else "./cache"
         self.models_cache = os.path.join(os.path.dirname(__file__), "models")
 
         # Model configuration
@@ -233,20 +232,48 @@ class IndexManager:
             # Clear existing index
             if Path(self.storage_dir).exists():
                 shutil.rmtree(self.storage_dir)
-            Path(self.storage_dir).mkdir()
+            Path(self.storage_dir).mkdir(parents=True, exist_ok=True)
+
+            # Get files for this session from database
+            from utils.database import ConversationDB
+
+            db = ConversationDB()
+            session_files = []
+
+            if self.session_id:
+                files = db.get_conversation_files(self.session_id)
+                session_files = [file_path for file_path, _ in files]
+            else:
+                # Fallback to all files in directory if no session_id
+                session_files = [
+                    os.path.join(self.data_dir, f) for f in os.listdir(self.data_dir)
+                ]
+
+            if not session_files:
+                logger.warning("No documents found for indexing")
+                return
 
             # Load documents
-            reader = SimpleDirectoryReader(
-                self.data_dir,
-                file_metadata=get_file_metadata,
-                filename_as_id=True,
-                exclude_hidden=True,
-            )
-            documents = reader.load_data()
-            documents += self._process_json_files()
+            documents = []
+            for file_path in session_files:
+                try:
+                    if file_path.endswith(".json"):
+                        docs = self._process_json_file(file_path)
+                        documents.extend(docs)
+                    else:
+                        reader = SimpleDirectoryReader(
+                            input_files=[file_path],
+                            file_metadata=get_file_metadata,
+                            filename_as_id=True,
+                            exclude_hidden=True,
+                        )
+                        documents.extend(reader.load_data())
+                except Exception as e:
+                    logger.error(f"Error processing file {file_path}: {e}")
+                    continue
 
             if not documents:
-                logger.warning("No documents found for indexing")
+                logger.warning("No documents could be processed")
                 return
 
             # Create index
@@ -272,21 +299,22 @@ class IndexManager:
             logger.error(f"Index build failed: {e}")
             raise
 
+    def _process_json_file(self, file_path: str):
+        """Handle a single JSON document"""
+        try:
+            reader = JSONReader(levels_back=2, collapse_length=500)
+            docs = reader.load_data(file_path)
+            for doc in docs:
+                doc.metadata.update(get_file_metadata(file_path))
+            logger.info(f"Processed JSON file: {file_path}")
+            return docs
+        except Exception as e:
+            logger.error(f"JSON error {file_path}: {e}")
+            return []
+
     def _process_json_files(self):
-        """Handle JSON documents"""
-        json_docs = []
-        for fname in os.listdir(self.data_dir):
-            if fname.endswith(".json"):
-                try:
-                    reader = JSONReader(levels_back=2, collapse_length=500)
-                    docs = reader.load_data(os.path.join(self.data_dir, fname))
-                    for doc in docs:
-                        doc.metadata.update(get_file_metadata(fname))
-                    json_docs.extend(docs)
-                    logger.info(f"Processed JSON file: {fname}")
-                except Exception as e:
-                    logger.error(f"JSON error {fname}: {e}")
-        return json_docs
+        """Handle JSON documents - Deprecated, use _process_json_file instead"""
+        return []
 
     def load_index(self):
         """Load existing index"""

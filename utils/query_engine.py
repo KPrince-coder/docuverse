@@ -23,12 +23,16 @@ Instructions:
 
 Answer: """
 
+MODEL = "deepseek-r1-distill-llama-70b"
+
+
 class QueryEngine:
-    def __init__(self, groq_api_key):
+    def __init__(self, groq_api_key, session_id: str = None):
         self.llm = None
+        self.session_id = session_id
         self.initialize_llm(groq_api_key)
         Settings.llm = self.llm
-        self.index_manager = IndexManager()
+        self.index_manager = IndexManager(session_id=session_id)
         self._response_cache = {}
 
     def initialize_llm(self, api_key: str, max_retries: int = 3) -> None:
@@ -39,7 +43,8 @@ class QueryEngine:
         while retry_count < max_retries:
             try:
                 self.llm = Groq(
-                    model="mixtral-8x7b-32768",
+                    # model="mixtral-8x7b-32768",
+                    model=MODEL,
                     api_key=api_key,
                     temperature=0.3,
                     max_tokens=2048,
@@ -51,12 +56,14 @@ class QueryEngine:
                 last_error = str(e)
                 wait_time = min(2**retry_count, 30)  # Cap wait time at 30 seconds
                 logger.warning(f"LLM init attempt {retry_count} failed: {last_error}")
-                
+
                 if retry_count < max_retries:
                     logger.info(f"Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"Failed to initialize LLM after {max_retries} attempts. Last error: {last_error}")
+                    logger.error(
+                        f"Failed to initialize LLM after {max_retries} attempts. Last error: {last_error}"
+                    )
                     raise RuntimeError(f"Failed to initialize LLM: {last_error}")
 
     def _format_context(self, nodes: List[dict], max_length: int = 3000) -> str:
@@ -73,14 +80,14 @@ class QueryEngine:
 
             source = node.metadata.get("file_name", "Unknown Source")
             text = node.text.strip()
-            
+
             # Format this chunk with source
             chunk = f"[From: {source}]\n{text}\n---\n"
-            
+
             # Check if adding this would exceed max length
             if current_length + len(chunk) > max_length:
                 break
-                
+
             context_parts.append(chunk)
             current_length += len(chunk)
 
@@ -90,7 +97,11 @@ class QueryEngine:
         """Process query and return a response."""
         try:
             # Check cache first
-            cache_key = hash(question)
+            cache_key = (
+                f"{self.session_id}_{hash(question)}"
+                if self.session_id
+                else hash(question)
+            )
             if cache_key in self._response_cache:
                 logger.info("Returning cached response")
                 return self._response_cache[cache_key]
@@ -106,10 +117,7 @@ class QueryEngine:
                 return "I encountered an error processing the document context. Please try again."
 
             # Build prompt using template
-            prompt = PROMPT_TEMPLATE.format(
-                context=context,
-                question=question
-            )
+            prompt = PROMPT_TEMPLATE.format(context=context, question=question)
 
             # Get response from LLM
             response = self.llm.complete(
@@ -126,7 +134,7 @@ class QueryEngine:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error in query processing: {error_msg}", exc_info=True)
-            
+
             if "rate limit" in error_msg.lower():
                 return "I'm currently experiencing high demand. Please try again in a few moments."
             elif "timeout" in error_msg.lower():
@@ -140,5 +148,5 @@ class QueryEngine:
             "query": query,
             "response": response,
             "context_count": len(contexts),
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
