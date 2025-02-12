@@ -1,9 +1,8 @@
 import logging
 import time
-from typing import List, Optional
+from typing import List
 from llama_index.core import Settings
 from llama_index.llms.groq import Groq
-from llama_index.core.evaluation import FaithfulnessEvaluator, RelevancyEvaluator
 from utils.index_manager import IndexManager
 
 logger = logging.getLogger(__name__)
