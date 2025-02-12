@@ -92,6 +92,25 @@ st.title("🚀 DocuVerse: Your Document Intelligence Assistant")
 
 tab1, tab2 = st.tabs(["Upload & Chat", "History"])
 
+
+def delete_file(file_path: str, file_name: str, session_id: str):
+    """Delete a file and its database entry."""
+    try:
+        # Remove file from disk
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        # Remove file from database
+        db.delete_file(session_id, file_path)
+
+        # Rebuild index after file deletion
+        query_engine.index_manager.build_index()
+        return True
+    except Exception as e:
+        st.error(f"Error deleting file: {e}")
+        return False
+
+
 with tab1:
     # File upload section
     st.subheader("📂 Upload Files")
@@ -121,11 +140,21 @@ with tab1:
 
     # Show current conversation's files
     if selected_session_id:
-        files = db.get_conversation_files(selected_session_id)
+        files = db.get_files(selected_session_id)
         if files:
             st.subheader("📄 Uploaded Files")
-            for _, file_name in files:
-                st.text(f"• {file_name}")
+            for file_path, file_name in files:
+                col1, col2 = st.columns([6, 1])
+                with col1:
+                    st.text(f"• {file_name}")
+                with col2:
+                    if st.button("🗑️", key=f"delete_file_{file_name}"):
+                        if st.button("Confirm deletion?", key=f"confirm_{file_name}"):
+                            if delete_file(file_path, file_name, selected_session_id):
+                                st.success(f"Deleted {file_name}")
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to delete {file_name}")
 
     # Chat section
     st.subheader("💬 Chat")

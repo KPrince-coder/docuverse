@@ -1,6 +1,10 @@
 import sqlite3
 from datetime import datetime
 import os
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class ConversationDB:
@@ -140,6 +144,19 @@ class ConversationDB:
             "DELETE FROM conversations WHERE session_id = ?", (session_id,)
         )
         self.conn.commit()
+
+    def delete_file(self, session_id: str, file_path: str):
+        """Deletes a specific file from the database."""
+        try:
+            self.cursor.execute(
+                "DELETE FROM files WHERE session_id = ? AND file_path = ?",
+                (session_id, file_path),
+            )
+            self.conn.commit()
+        except Exception as e:
+            logger.error(f"Error deleting file from database: {e}")
+            self.conn.rollback()
+            raise
 
     def close(self):
         """Closes the database connection."""
