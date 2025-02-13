@@ -7,20 +7,23 @@ from .index_manager import IndexManager
 
 logger = logging.getLogger(__name__)
 
-PROMPT_TEMPLATE = """You are a helpful AI assistant analyzing multiple documents. Answer based on all available context. If you cannot find the complete answer in the provided context, say so.
+PROMPT_TEMPLATE = """You are a helpful AI assistant analyzing documents and maintaining conversation context. 
 
-Context from multiple documents:
+Previous conversation:
+{conversation_history}
+
+Context from documents:
 {context}
 
-Question: {question}
+Current question: {question}
 
 Instructions:
-1. Consider ALL provided context from ALL documents when answering
-2. Synthesize information from multiple sources if relevant
+1. Consider both the conversation history AND document context
+2. Reference previous questions/answers when relevant
 3. Cite specific documents when referencing information
-4. Be thorough but concise
-5. If information from multiple documents conflicts, mention this
-6. If the answer isn't fully available in the context, say so
+4. Be consistent with previous responses
+5. If information conflicts with previous answers, explain the difference
+6. If the answer isn't in the context or previous conversation, say so
 
 Answer: """
 
@@ -119,8 +122,20 @@ class QueryEngine:
 
         return "\n".join(context_parts)
 
-    def query(self, question: str) -> str:
-        """Process query and return a response."""
+    def _format_conversation_history(self, history: List[dict]) -> str:
+        """Format conversation history for context."""
+        if not history:
+            return "No previous conversation."
+
+        formatted_history = []
+        for msg in history[:-1]:  # Exclude current question
+            role = "User" if msg["role"] == "user" else "Assistant"
+            formatted_history.append(f"{role}: {msg['content']}")
+
+        return "\n".join(formatted_history)
+
+    def query(self, question: str, conversation_history: List[dict] = None) -> str:
+        """Process query with conversation history."""
         try:
             # Ensure index exists
             if not self._ensure_index():
@@ -136,20 +151,23 @@ class QueryEngine:
                 logger.info("Returning cached response")
                 return self._response_cache[cache_key]
 
-            # Get context from documents with increased retrieval
-            retrieved_nodes = self.index_manager.query_index(
-                question, top_k=5
-            )  # Increased from 3
+            # Format conversation history
+            conv_history = self._format_conversation_history(conversation_history or [])
+
+            # Get document context
+            retrieved_nodes = self.index_manager.query_index(question, top_k=5)
             if not retrieved_nodes:
                 return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question."
 
-            # Format context with source attribution
-            context = self._format_context(retrieved_nodes)
-            if not context:
-                return "I encountered an error processing the document context. Please try again."
+            # Format document context
+            doc_context = self._format_context(retrieved_nodes)
 
-            # Build prompt using template
-            prompt = PROMPT_TEMPLATE.format(context=context, question=question)
+            # Build prompt with both contexts
+            prompt = PROMPT_TEMPLATE.format(
+                conversation_history=conv_history,
+                context=doc_context,
+                question=question,
+            )
 
             # Get response from LLM with increased tokens
             response = self.llm.complete(

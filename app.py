@@ -73,6 +73,34 @@ st.markdown(
 }
 .main-content {
     margin-bottom: 80px;  /* Add space for footer */
+    position: relative;
+}
+
+
+.chat-messages-container {
+    padding-bottom: 2rem;
+    overflow-y: auto;
+}
+
+.fixed-chat-input {
+    position: fixed;
+    bottom: 0;
+    left: 0;  /* Match sidebar width */
+    right: 0;
+    padding: 1rem;
+    height: 8rem;
+    background: white;
+    z-index: 100;
+}
+
+.chat-messages {
+    margin-bottom: 80px;  /* Make space for fixed chat input */
+    overflow-y: auto;
+    padding-bottom: 2rem;
+}
+
+[data-testid="stVerticalBlock"] {
+    padding-bottom: 60px;  /* Add padding to prevent content from being hidden behind chat input */
 }
 </style>
 """,
@@ -199,7 +227,7 @@ st.title("🚀 DocuVerse: Your Document Intelligence Assistant")
 # Wrap main content in a div with margin-bottom
 st.markdown('<div class="main-content">', unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["Upload & Chat", "History"])
+tab1, tab2 = st.tabs(["📤 Upload & Chat", "📜 History"])
 
 
 def delete_file(file_path: str, file_name: str, session_id: str):
@@ -357,74 +385,93 @@ with tab1:
     if not selected_session_id:
         st.info("Please start a new conversation using the sidebar.")
     else:
-        # Create a container for all chat content
-        chat_container = st.container()
+        # Create message container
+        messages_container = st.container()
 
-        # Display existing messages first
-        with chat_container:
+        with messages_container:
+            st.markdown('<div class="chat-messages">', unsafe_allow_html=True)
+
+            # Get all previous messages for context
             messages = db.get_messages(selected_session_id)
+            conversation_history = []
+
             for role, content, timestamp in messages:
                 with st.chat_message(role):
                     st.write(content)
                     st.caption(f"Sent at {timestamp[:16]}")
+                conversation_history.append({"role": role, "content": content})
 
-        # Then handle new messages
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # Fixed chat input at bottom (only in Upload & Chat tab)
+        st.markdown(
+            """
+            <div class="fixed-chat-input">
+                <style>
+                    /* Override Streamlit's default padding for chat input */
+                    .stChatInput {
+                        position:fixed;
+                        bottom: 4.5rem;
+                        z-index: 100;
+                    }
+                </style>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Place chat input
         question = st.chat_input("Ask about your documents...")
+
         if question:
             session_files = get_session_files(selected_session_id)
             if not session_files:
                 st.error("Please upload some documents first!")
             else:
-                with chat_container:
-                    # Show user message
+                with messages_container:
                     with st.chat_message("user"):
                         st.write(question)
+                        conversation_history.append(
+                            {"role": "user", "content": question}
+                        )
 
-                    # Get and show AI response
                     with st.chat_message("assistant"):
                         with st.spinner("Thinking..."):
                             query_engine = query_engines.get(selected_session_id)
                             if not query_engine:
-                                # Reinitialize query engine if missing
                                 query_engine = QueryEngine(
                                     os.getenv("GROQ_API_KEY"),
                                     session_id=selected_session_id,
                                 )
                                 query_engines[selected_session_id] = query_engine
 
-                            # Force index rebuild if needed
-                            if not query_engine.index_manager.index:
-                                with st.status("Rebuilding document index..."):
-                                    query_engine.index_manager.build_index()
+                            # Include conversation history in the query
+                            response = query_engine.query(
+                                question, conversation_history=conversation_history
+                            )
+                            st.write(response)
 
-                            if query_engine and query_engine.index_manager.index:
-                                response = query_engine.query(question)
-                                st.write(response)
+                            # Update conversation history
+                            conversation_history.append(
+                                {"role": "assistant", "content": response}
+                            )
 
-                                # Store both messages
-                                db.add_message(selected_session_id, "user", question)
-                                db.add_message(
-                                    selected_session_id, "assistant", response
-                                )
+                            # Store messages
+                            db.add_message(selected_session_id, "user", question)
+                            db.add_message(selected_session_id, "assistant", response)
 
-                                # Suggest name for new conversations
-                                current_name = db.get_conversation_name(
+                            # Suggest name for new conversations
+                            current_name = db.get_conversation_name(selected_session_id)
+                            if current_name == "✨New Conversation":
+                                suggested_name = db.suggest_conversation_name(
                                     selected_session_id
                                 )
-                                if current_name == "New Conversation":
-                                    suggested_name = db.suggest_conversation_name(
-                                        selected_session_id
-                                    )
-                                    db.update_conversation_name(
-                                        selected_session_id, suggested_name
-                                    )
-
-                                # Rerun to update chat history
-                                st.rerun()
-                            else:
-                                st.error(
-                                    "Session not initialized properly. Please try refreshing the page."
+                                db.update_conversation_name(
+                                    selected_session_id, suggested_name
                                 )
+
+                            # Rerun to update chat history
+                            st.rerun()
 
 with tab2:
     st.header("📖 Conversation History")
