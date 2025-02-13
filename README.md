@@ -4,6 +4,10 @@
 
 Docuverse is a Streamlit application that allows users to upload documents, query them using a Large Language Model (LLM), and have conversations with the documents. It uses Langchain to interact with LLMs and ChromaDB for vector storage.
 
+## UI
+
+Coming soon...
+
 ## Features
 
 * **Document Upload:** Users can upload documents in various formats (e.g., PDF, TXT, CSV).
