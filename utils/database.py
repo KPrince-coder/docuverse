@@ -19,6 +19,7 @@ class ConversationDB:
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT UNIQUE,
+                name TEXT,
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -52,15 +53,61 @@ class ConversationDB:
         """Creates a new conversation and returns its session ID."""
         session_id = f"session_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         created_at = datetime.now().isoformat()
+        default_name = "New Conversation"
         self.cursor.execute(
             """
-            INSERT INTO conversations (session_id, created_at, updated_at)
-            VALUES (?, ?, ?)
+            INSERT INTO conversations (session_id, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
         """,
-            (session_id, created_at, created_at),
+            (session_id, default_name, created_at, created_at),
         )
         self.conn.commit()
         return session_id
+
+    def update_conversation_name(self, session_id: str, name: str):
+        """Updates the name of a conversation."""
+        try:
+            self.cursor.execute(
+                """
+                UPDATE conversations 
+                SET name = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (name, datetime.now().isoformat(), session_id),
+            )
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating conversation name: {e}")
+            return False
+
+    def get_conversation_name(self, session_id: str) -> str:
+        """Retrieves the name of a conversation."""
+        self.cursor.execute(
+            "SELECT name FROM conversations WHERE session_id = ?", (session_id,)
+        )
+        result = self.cursor.fetchone()
+        return result[0] if result else "Unnamed Conversation"
+
+    def suggest_conversation_name(self, session_id: str) -> str:
+        """Suggests a name based on the first user message."""
+        self.cursor.execute(
+            """
+            SELECT content 
+            FROM messages 
+            WHERE session_id = ? AND role = 'user' 
+            ORDER BY timestamp ASC LIMIT 1
+            """,
+            (session_id,),
+        )
+        first_message = self.cursor.fetchone()
+        if first_message:
+            # Truncate and clean the message to create a title
+            name = first_message[0][:50].strip()
+            if len(first_message[0]) > 50:
+                name += "..."
+            return name
+        return "New Conversation"
 
     def add_message(self, session_id, role, content):
         """Adds a message to the specified conversation."""
@@ -80,12 +127,14 @@ class ConversationDB:
             # Check if file already exists
             self.cursor.execute(
                 "SELECT COUNT(*) FROM files WHERE session_id = ? AND file_name = ?",
-                (session_id, file_name)
+                (session_id, file_name),
             )
             if self.cursor.fetchone()[0] > 0:
-                logger.warning(f"File {file_name} already exists in session {session_id}")
+                logger.warning(
+                    f"File {file_name} already exists in session {session_id}"
+                )
                 return False
-                
+
             timestamp = datetime.now().isoformat()
             self.cursor.execute(
                 """
