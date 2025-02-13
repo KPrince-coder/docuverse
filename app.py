@@ -94,12 +94,6 @@ st.markdown(
     padding-bottom: 2rem;
 }
 
-.fixed-chat-container {
-    position: fixed;
-    bottom: 8rem;
-    
-}
-
 </style>
 """,
     unsafe_allow_html=True,
@@ -400,7 +394,7 @@ with tab1:
                 with st.chat_message(role):
                     st.write(content)
                     st.caption(
-                        f"{'Sent' if role == 'user' else 'Received'} at {formatted_time}"
+                        f"{'Sent' if role == 'user' else 'Received'} on {formatted_time}"
                     )
                 conversation_history.append({"role": role, "content": content})
 
@@ -548,7 +542,7 @@ with tab2:
                             with st.chat_message(role):
                                 st.write(content)
                                 st.caption(
-                                    f"{'Sent' if role == 'user' else 'Received'} at {formatted_time}"
+                                    f"{'Sent' if role == 'user' else 'Received'} on {formatted_time}"
                                 )
 
 
