@@ -77,11 +77,6 @@ st.markdown(
 }
 
 
-.chat-messages-container {
-    padding-bottom: 2rem;
-    overflow-y: auto;
-}
-
 .fixed-chat-input {
     position: fixed;
     bottom: 0;
@@ -99,9 +94,12 @@ st.markdown(
     padding-bottom: 2rem;
 }
 
-[data-testid="stVerticalBlock"] {
-    padding-bottom: 60px;  /* Add padding to prevent content from being hidden behind chat input */
+.fixed-chat-container {
+    position: fixed;
+    bottom: 8rem;
+    
 }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -396,14 +394,20 @@ with tab1:
             conversation_history = []
 
             for role, content, timestamp in messages:
+                formatted_time = datetime.fromisoformat(timestamp).strftime(
+                    "%a, %b %d, %Y at %H:%M"
+                )
                 with st.chat_message(role):
                     st.write(content)
-                    st.caption(f"Sent at {timestamp[:16]}")
+                    st.caption(
+                        f"{'Sent' if role == 'user' else 'Received'} at {formatted_time}"
+                    )
                 conversation_history.append({"role": role, "content": content})
 
             st.markdown("</div>", unsafe_allow_html=True)
 
         # Fixed chat input at bottom (only in Upload & Chat tab)
+
         st.markdown(
             """
             <div class="fixed-chat-input">
@@ -421,7 +425,10 @@ with tab1:
         )
 
         # Place chat input
-        question = st.chat_input("Ask about your documents...")
+        question = st.chat_input(
+            "✍️ Ask about your documents...",
+            key="chat_input",
+        )
 
         if question:
             session_files = get_session_files(selected_session_id)
@@ -436,7 +443,7 @@ with tab1:
                         )
 
                     with st.chat_message("assistant"):
-                        with st.spinner("Thinking..."):
+                        with st.spinner("🧠 Analyzing document(s)..."):
                             query_engine = query_engines.get(selected_session_id)
                             if not query_engine:
                                 query_engine = QueryEngine(
@@ -535,9 +542,15 @@ with tab2:
                         st.info("No messages in this conversation.")
                     else:
                         for role, content, timestamp in messages:
+                            formatted_time = datetime.fromisoformat(timestamp).strftime(
+                                "%a, %b %d, %Y at %H:%M"
+                            )
                             with st.chat_message(role):
                                 st.write(content)
-                                st.caption(f"Sent at {timestamp[:16]}")
+                                st.caption(
+                                    f"{'Sent' if role == 'user' else 'Received'} at {formatted_time}"
+                                )
+
 
 # Close the main-content div
 st.markdown("</div>", unsafe_allow_html=True)
