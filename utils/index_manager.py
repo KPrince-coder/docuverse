@@ -2,7 +2,6 @@ import os
 import time
 import logging
 import pickle
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -127,6 +126,9 @@ class IndexManager:
         self.storage_dir = f"./storage/{session_id}" if session_id else "./storage"
         self.cache_dir = f"./cache/{session_id}" if session_id else "./cache"
         self.models_cache = os.path.join(os.path.dirname(__file__), "models")
+        self.session_dir = (
+            f"data/uploads/{session_id}" if session_id else "data/uploads"
+        )
 
         # Model configuration
         self.model_name = "BAAI/bge-small-en"  # Changed model for better compatibility
@@ -138,7 +140,7 @@ class IndexManager:
 
         # Initialize directories
         for path in [
-            self.data_dir,
+            self.session_dir,  # Add session-specific upload directory
             self.storage_dir,
             self.cache_dir,
             self.models_cache,
@@ -150,9 +152,9 @@ class IndexManager:
         self._load_caches()
 
         # Configure global settings
-        Settings.chunk_size = 1024
+        Settings.chunk_size = 512  # Smaller chunks for better retrieval
         Settings.chunk_overlap = 50
-        Settings.num_output = 512
+        Settings.num_output = 1024
         Settings.embed_model = self.embed_model
 
     def _initialize_embedding_model(self):
@@ -225,41 +227,44 @@ class IndexManager:
         return f"{stats.st_size}_{stats.st_mtime}"
 
     def build_index(self):
-        """Build or rebuild vector index"""
+        """Build or rebuild vector index with improved multi-document handling."""
         try:
             logger.info("Starting index construction...")
-
-            # Clear existing index
-            if Path(self.storage_dir).exists():
-                shutil.rmtree(self.storage_dir)
-            Path(self.storage_dir).mkdir(parents=True, exist_ok=True)
+            documents = []
+            processed_count = 0
+            failed_count = 0
 
             # Get files for this session from database
             from utils.database import ConversationDB
 
             db = ConversationDB()
-            session_files = []
 
-            if self.session_id:
-                files = db.get_conversation_files(self.session_id)
-                session_files = [file_path for file_path, _ in files]
-            else:
-                # Fallback to all files in directory if no session_id
-                session_files = [
-                    os.path.join(self.data_dir, f) for f in os.listdir(self.data_dir)
-                ]
-
-            if not session_files:
-                logger.warning("No documents found for indexing")
+            if not self.session_id:
+                logger.error("No session_id provided")
                 return
 
-            # Load documents
-            documents = []
-            for file_path in session_files:
+            session_files = db.get_conversation_files(self.session_id)
+
+            if not session_files:
+                logger.warning(f"No documents found for session {self.session_id}")
+                return
+
+            logger.info(
+                f"Processing {len(session_files)} files for session {self.session_id}"
+            )
+
+            for file_path, file_name in session_files:
                 try:
+                    if not os.path.exists(file_path):
+                        logger.error(f"File not found: {file_path}")
+                        failed_count += 1
+                        continue
+
                     if file_path.endswith(".json"):
                         docs = self._process_json_file(file_path)
-                        documents.extend(docs)
+                        if docs:
+                            documents.extend(docs)
+                            processed_count += 1
                     else:
                         reader = SimpleDirectoryReader(
                             input_files=[file_path],
@@ -267,16 +272,25 @@ class IndexManager:
                             filename_as_id=True,
                             exclude_hidden=True,
                         )
-                        documents.extend(reader.load_data())
+                        docs = reader.load_data()
+                        if docs:
+                            documents.extend(docs)
+                            processed_count += 1
+
                 except Exception as e:
                     logger.error(f"Error processing file {file_path}: {e}")
+                    failed_count += 1
                     continue
+
+            logger.info(f"Successfully processed {processed_count} files")
+            if failed_count > 0:
+                logger.warning(f"Failed to process {failed_count} files")
 
             if not documents:
                 logger.warning("No documents could be processed")
                 return
 
-            # Create index
+            # Create index with improved settings
             storage_context = StorageContext.from_defaults()
             self.index = VectorStoreIndex.from_documents(
                 documents,
@@ -285,9 +299,12 @@ class IndexManager:
                     SentenceSplitter(
                         chunk_size=Settings.chunk_size,
                         chunk_overlap=Settings.chunk_overlap,
+                        separator=" ",
+                        paragraph_separator="\n\n",
                     )
                 ],
                 embed_model=self.embed_model,
+                show_progress=True,
             )
 
             # Persist index
@@ -296,7 +313,7 @@ class IndexManager:
             logger.info(f"Index built with {len(documents)} documents")
 
         except Exception as e:
-            logger.error(f"Index build failed: {e}")
+            logger.error(f"Index build failed: {e}", exc_info=True)
             raise
 
     def _process_json_file(self, file_path: str):
@@ -333,17 +350,33 @@ class IndexManager:
             logger.error(f"Index load error: {e}")
             self.build_index()
 
-    def query_index(self, query: str, top_k: int = 3):
-        """Execute search query"""
+    def query_index(self, query: str, top_k: int = 5):
+        """Execute search query with improved retrieval."""
         if not self.index or self._should_rebuild():
             self.build_index()
 
         try:
+            # Create query engine with improved settings
             query_engine = self.index.as_query_engine(
-                similarity_top_k=top_k, response_mode="compact"
+                similarity_top_k=top_k,
+                vector_store_kwargs={
+                    "similarity_cutoff": 0.7,  # Only include relevant results
+                    "distance_metric": "cosine",  # Use cosine similarity
+                },
+                response_mode="compact",
             )
+
             response = query_engine.query(query)
-            return getattr(response, "source_nodes", [])
+            nodes = getattr(response, "source_nodes", [])
+
+            # Sort nodes by relevance score if available
+            if nodes and hasattr(nodes[0], "score"):
+                nodes = sorted(
+                    nodes, key=lambda x: getattr(x, "score", 0), reverse=True
+                )
+
+            return nodes
+
         except Exception as e:
             logger.error(f"Query failed: {e}")
             return []

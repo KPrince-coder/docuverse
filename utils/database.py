@@ -189,7 +189,13 @@ class ConversationDB:
     def get_conversation_files(self, session_id):
         """Gets all files associated with a conversation."""
         self.cursor.execute(
-            "SELECT file_path, file_name FROM files WHERE session_id = ?", (session_id,)
+            """
+            SELECT file_path, file_name 
+            FROM files 
+            WHERE session_id = ?
+            ORDER BY uploaded_at
+            """,
+            (session_id,),
         )
         return self.cursor.fetchall()
 
@@ -215,17 +221,36 @@ class ConversationDB:
         self.conn.commit()
 
     def delete_file(self, session_id: str, file_path: str):
-        """Deletes a specific file from the database."""
+        """Deletes a specific file from the database and disk."""
         try:
+            # Verify file belongs to session before deleting
+            self.cursor.execute(
+                """
+                SELECT file_path 
+                FROM files 
+                WHERE session_id = ? AND file_path = ?
+                """,
+                (session_id, file_path),
+            )
+            if not self.cursor.fetchone():
+                logger.warning(f"File {file_path} not found in session {session_id}")
+                return False
+
+            # Delete file from disk
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+            # Delete from database
             self.cursor.execute(
                 "DELETE FROM files WHERE session_id = ? AND file_path = ?",
                 (session_id, file_path),
             )
             self.conn.commit()
+            return True
         except Exception as e:
-            logger.error(f"Error deleting file from database: {e}")
+            logger.error(f"Error deleting file: {e}")
             self.conn.rollback()
-            raise
+            return False
 
     def close(self):
         """Closes the database connection."""

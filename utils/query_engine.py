@@ -7,18 +7,20 @@ from utils.index_manager import IndexManager
 
 logger = logging.getLogger(__name__)
 
-PROMPT_TEMPLATE = """You are a helpful AI assistant analyzing documents. Use the following context to answer the question. If you cannot find the answer in the context, say "I don't have enough information to answer that question."
+PROMPT_TEMPLATE = """You are a helpful AI assistant analyzing multiple documents. Answer based on all available context. If you cannot find the complete answer in the provided context, say so.
 
-Context from documents:
+Context from multiple documents:
 {context}
 
 Question: {question}
 
 Instructions:
-1. Answer based ONLY on the provided context
-2. If the answer isn't clear from the context, say so
-3. Include relevant source document names in your response
-4. Be concise but complete
+1. Consider ALL provided context from ALL documents when answering
+2. Synthesize information from multiple sources if relevant
+3. Cite specific documents when referencing information
+4. Be thorough but concise
+5. If information from multiple documents conflicts, mention this
+6. If the answer isn't fully available in the context, say so
 
 Answer: """
 
@@ -65,13 +67,14 @@ class QueryEngine:
                     )
                     raise RuntimeError(f"Failed to initialize LLM: {last_error}")
 
-    def _format_context(self, nodes: List[dict], max_length: int = 3000) -> str:
-        """Format context from retrieved nodes with source attribution."""
+    def _format_context(self, nodes: List[dict], max_length: int = 4000) -> str:
+        """Format context from retrieved nodes with better source attribution."""
         if not nodes:
             return ""
 
         context_parts = []
         current_length = 0
+        sources_seen = set()
 
         for node in nodes:
             if not hasattr(node, "metadata") or not hasattr(node, "text"):
@@ -80,11 +83,22 @@ class QueryEngine:
             source = node.metadata.get("file_name", "Unknown Source")
             text = node.text.strip()
 
+            # Skip if we've already included too much from this source
+            if source in sources_seen and len(sources_seen) > 1:
+                continue
+
+            sources_seen.add(source)
+
             # Format this chunk with source
-            chunk = f"[From: {source}]\n{text}\n---\n"
+            chunk = f"\n[From {source}]\n{text}\n---\n"
 
             # Check if adding this would exceed max length
             if current_length + len(chunk) > max_length:
+                # Try to include at least something from every source
+                if len(sources_seen) < len(
+                    set(n.metadata.get("file_name", "") for n in nodes)
+                ):
+                    continue
                 break
 
             context_parts.append(chunk)
@@ -105,8 +119,10 @@ class QueryEngine:
                 logger.info("Returning cached response")
                 return self._response_cache[cache_key]
 
-            # Get context from documents
-            retrieved_nodes = self.index_manager.query_index(question)
+            # Get context from documents with increased retrieval
+            retrieved_nodes = self.index_manager.query_index(
+                question, top_k=5
+            )  # Increased from 3
             if not retrieved_nodes:
                 return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question."
 
@@ -118,10 +134,10 @@ class QueryEngine:
             # Build prompt using template
             prompt = PROMPT_TEMPLATE.format(context=context, question=question)
 
-            # Get response from LLM
+            # Get response from LLM with increased tokens
             response = self.llm.complete(
                 prompt,
-                max_tokens=1000,
+                max_tokens=2000,  # Increased from 1000
                 temperature=0.3,
             )
 

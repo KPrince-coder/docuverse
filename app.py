@@ -6,6 +6,11 @@ from datetime import datetime
 from utils.database import ConversationDB
 from utils.query_engine import QueryEngine
 
+# Configure logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+
 # Configure Streamlit
 st.set_page_config(
     page_title="DocuVerse",
@@ -217,6 +222,27 @@ def delete_file(file_path: str, file_name: str, session_id: str):
         return False
 
 
+def handle_file_upload(uploaded_file, session_id):
+    """Handle single file upload with better error handling"""
+    try:
+        # Create session-specific directory
+        session_upload_dir = os.path.join(UPLOAD_DIR, session_id)
+        os.makedirs(session_upload_dir, exist_ok=True)
+
+        file_path = os.path.join(session_upload_dir, uploaded_file.name)
+
+        # Try to add file to database first
+        if db.add_file(session_id, file_path, uploaded_file.name):
+            # Only write file to disk if database insertion was successful
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error handling file upload: {e}")
+        return False
+
+
 with tab1:
     # File upload section
     st.subheader("📂 Upload Files")
@@ -231,27 +257,32 @@ with tab1:
         )
 
         if uploaded_files:
-            with st.status("Processing files..."):
+            with st.status("Processing files...") as status:
+                successful_uploads = 0
+                failed_uploads = 0
+
                 for uploaded_file in uploaded_files:
-                    file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
-
-                    # Try to add file to database first
-                    if db.add_file(selected_session_id, file_path, uploaded_file.name):
-                        # Only write file to disk if database insertion was successful
-                        with open(file_path, "wb") as f:
-                            f.write(uploaded_file.getbuffer())
-                        st.write(f"Processing: {uploaded_file.name}")
+                    status.write(f"Processing: {uploaded_file.name}")
+                    if handle_file_upload(uploaded_file, selected_session_id):
+                        successful_uploads += 1
+                        status.write(f"✅ Processed: {uploaded_file.name}")
                     else:
-                        st.warning(
-                            f"File {uploaded_file.name} already exists in this conversation. Skipping..."
-                        )
-                        continue
+                        failed_uploads += 1
+                        status.write(f"❌ Failed: {uploaded_file.name}")
 
-                # Rebuild the index after uploading new files
-                query_engine = query_engines.get(selected_session_id)
-                if query_engine:
-                    query_engine.index_manager.build_index()
-                st.success("Files processed successfully!")
+                # Rebuild the index after all files are uploaded
+                if successful_uploads > 0:
+                    status.write("Rebuilding search index...")
+                    query_engine = query_engines.get(selected_session_id)
+                    if query_engine:
+                        query_engine.index_manager.build_index()
+
+                status.update(label="Upload Complete", state="complete")
+
+                if successful_uploads > 0:
+                    st.success(f"Successfully processed {successful_uploads} files")
+                if failed_uploads > 0:
+                    st.error(f"Failed to process {failed_uploads} files")
 
     # Show current conversation's files
     if selected_session_id:
@@ -300,7 +331,9 @@ else:
     # Then handle new messages
     question = st.chat_input("Ask about your documents...")
     if question:
-        if not os.listdir(UPLOAD_DIR):
+        # Check for files in session-specific directory
+        session_upload_dir = os.path.join(UPLOAD_DIR, selected_session_id)
+        if not os.path.exists(session_upload_dir) or not os.listdir(session_upload_dir):
             st.error("Please upload some documents first!")
         else:
             with chat_container:
