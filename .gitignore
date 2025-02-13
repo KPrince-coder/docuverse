@@ -1,0 +1,83 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+.venv/
+dist/
+build/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.whl
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from within a
+#  hook, so they are not easily detectable.
+*.manifest
+*.spec
+
+# Compiled source #
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Packages #
+# *.jpk
+# *.ppk
+# *.jar
+# *.war
+# *.ear
+# *.zip
+# *.gz
+# *.rar
+
+# Editors (VS Code, Sublime Text)
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Temporary files
+*~
+\#*\#
+.*.swp
+.DS_Store
+
+# Uv lock file
+uv.lock
+
+# Streamlit cache
+cache/
+
+# Data
+data/conversations.db
+data/uploads/
+
+# Storage
+storage/
+
+# Models
+utils/models/
+
+# Secrets
+.streamlit/secrets.toml

@@ -127,7 +127,7 @@ class IndexManager:
         self.cache_dir = f"./cache/{session_id}" if session_id else "./cache"
         self.models_cache = os.path.join(os.path.dirname(__file__), "models")
         self.session_dir = (
-            f"data/uploads/{session_id}" if session_id else "data/uploads"
+            os.path.join(data_dir, session_id) if session_id else data_dir
         )
 
         # Model configuration
@@ -230,91 +230,80 @@ class IndexManager:
         """Build or rebuild vector index with improved multi-document handling."""
         try:
             logger.info("Starting index construction...")
-            documents = []
-            processed_count = 0
-            failed_count = 0
+            if not self.session_id:
+                logger.error("No session_id provided")
+                return False  # Add return value
 
             # Get files for this session from database
-            from utils.database import ConversationDB
+            from .database import ConversationDB
 
             db = ConversationDB()
 
-            if not self.session_id:
-                logger.error("No session_id provided")
-                return
+            files = db.get_conversation_files(self.session_id)
 
-            session_files = db.get_conversation_files(self.session_id)
-
-            if not session_files:
+            if not files:
                 logger.warning(f"No documents found for session {self.session_id}")
-                return
+                return False  # Add return value
 
-            logger.info(
-                f"Processing {len(session_files)} files for session {self.session_id}"
-            )
+            logger.info(f"Processing {len(files)} files for session {self.session_id}")
+            documents = []
+            processed_count = 0
 
-            for file_path, file_name in session_files:
+            for file_path, file_name in files:
                 try:
                     if not os.path.exists(file_path):
                         logger.error(f"File not found: {file_path}")
-                        failed_count += 1
                         continue
 
-                    if file_path.endswith(".json"):
-                        docs = self._process_json_file(file_path)
-                        if docs:
-                            documents.extend(docs)
-                            processed_count += 1
-                    else:
-                        reader = SimpleDirectoryReader(
-                            input_files=[file_path],
-                            file_metadata=get_file_metadata,
-                            filename_as_id=True,
-                            exclude_hidden=True,
-                        )
-                        docs = reader.load_data()
-                        if docs:
-                            documents.extend(docs)
-                            processed_count += 1
+                    reader = SimpleDirectoryReader(
+                        input_files=[file_path],
+                        file_metadata=get_file_metadata,
+                        filename_as_id=True,
+                        exclude_hidden=True,
+                    )
+                    docs = reader.load_data()
+                    if docs:
+                        documents.extend(docs)
+                        processed_count += 1
+                        logger.info(f"Successfully processed {file_name}")
 
                 except Exception as e:
                     logger.error(f"Error processing file {file_path}: {e}")
-                    failed_count += 1
                     continue
-
-            logger.info(f"Successfully processed {processed_count} files")
-            if failed_count > 0:
-                logger.warning(f"Failed to process {failed_count} files")
 
             if not documents:
                 logger.warning("No documents could be processed")
-                return
+                return False  # Add return value
 
             # Create index with improved settings
-            storage_context = StorageContext.from_defaults()
-            self.index = VectorStoreIndex.from_documents(
-                documents,
-                storage_context=storage_context,
-                transformations=[
-                    SentenceSplitter(
-                        chunk_size=Settings.chunk_size,
-                        chunk_overlap=Settings.chunk_overlap,
-                        separator=" ",
-                        paragraph_separator="\n\n",
-                    )
-                ],
-                embed_model=self.embed_model,
-                show_progress=True,
-            )
+            logger.info("Creating vector index...")
+            try:
+                storage_context = StorageContext.from_defaults()
+                self.index = VectorStoreIndex.from_documents(
+                    documents,
+                    storage_context=storage_context,
+                    transformations=[
+                        SentenceSplitter(
+                            chunk_size=Settings.chunk_size,
+                            chunk_overlap=Settings.chunk_overlap,
+                        )
+                    ],
+                    embed_model=self.embed_model,
+                    show_progress=True,
+                )
 
-            # Persist index
-            storage_context.persist(persist_dir=self.storage_dir)
-            self.last_index_time = time.time()
-            logger.info(f"Index built with {len(documents)} documents")
+                # Persist index
+                storage_context.persist(persist_dir=self.storage_dir)
+                self.last_index_time = time.time()
+                logger.info(f"Index built with {len(documents)} documents")
+                return True  # Add return value
+            except Exception as e:
+                logger.error(f"Failed to create index: {e}")
+                return False
 
         except Exception as e:
             logger.error(f"Index build failed: {e}", exc_info=True)
-            raise
+            return False
 
     def _process_json_file(self, file_path: str):
         """Handle a single JSON document"""

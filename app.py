@@ -243,17 +243,41 @@ def handle_file_upload(uploaded_file, session_id):
         return False
 
 
+def get_session_files(session_id: str):
+    """Get files only for the specific session."""
+    session_upload_dir = os.path.join(UPLOAD_DIR, session_id)
+    if not os.path.exists(session_upload_dir):
+        return []
+    return db.get_conversation_files(session_id)
+
+
+# Add this function near the top with other helper functions
+def is_file_uploaded(session_id: str, file_name: str) -> bool:
+    """Check if a file is already uploaded in the session."""
+    session_upload_dir = os.path.join(UPLOAD_DIR, session_id)
+    file_path = os.path.join(session_upload_dir, file_name)
+    return os.path.exists(file_path)
+
+
+# Update the file upload section in tab1
 with tab1:
-    # File upload section
     st.subheader("📂 Upload Files")
 
     if not selected_session_id:
         st.warning("Please start a new conversation before uploading files.")
     else:
+        # Create session-specific directory
+        session_upload_dir = os.path.join(UPLOAD_DIR, selected_session_id)
+        os.makedirs(session_upload_dir, exist_ok=True)
+
+        # Show files only for current session
+        current_files = get_session_files(selected_session_id)
+
         uploaded_files = st.file_uploader(
             "Upload documents to chat about",
             type=SUPPORTED_FILE_TYPES,
             accept_multiple_files=True,
+            key=f"uploader_{selected_session_id}",  # Add unique key for each session
         )
 
         if uploaded_files:
@@ -261,7 +285,17 @@ with tab1:
                 successful_uploads = 0
                 failed_uploads = 0
 
+                # Create set of existing files
+                existing_files = {f[1] for f in get_session_files(selected_session_id)}
+
                 for uploaded_file in uploaded_files:
+                    # Skip if file is already uploaded
+                    if uploaded_file.name in existing_files:
+                        status.write(
+                            f"⏭️ Skipping already uploaded file: {uploaded_file.name}"
+                        )
+                        continue
+
                     status.write(f"Processing: {uploaded_file.name}")
                     if handle_file_upload(uploaded_file, selected_session_id):
                         successful_uploads += 1
@@ -284,14 +318,20 @@ with tab1:
                 if failed_uploads > 0:
                     st.error(f"Failed to process {failed_uploads} files")
 
-    # Show current conversation's files
+    # Update the files display section
     if selected_session_id:
-        files = db.get_conversation_files(selected_session_id)
+        files = get_session_files(selected_session_id)
         if files:
             st.subheader("📄 Uploaded Files")
             # Use a set to track unique file names
             seen_files = set()
             for file_path, file_name in files:
+                # Verify file belongs to current session
+                if not file_path.startswith(
+                    os.path.join(UPLOAD_DIR, selected_session_id)
+                ):
+                    continue
+
                 if file_name in seen_files:
                     continue
                 seen_files.add(file_name)
@@ -313,63 +353,78 @@ with tab1:
                                 st.error(f"Failed to delete {file_name}")
 
     # Chat section
-st.subheader("💬 Chat")
-if not selected_session_id:
-    st.info("Please start a new conversation using the sidebar.")
-else:
-    # Create a container for all chat content
-    chat_container = st.container()
+    st.subheader("💬 Chat")
+    if not selected_session_id:
+        st.info("Please start a new conversation using the sidebar.")
+    else:
+        # Create a container for all chat content
+        chat_container = st.container()
 
-    # Display existing messages first
-    with chat_container:
-        messages = db.get_messages(selected_session_id)
-        for role, content, timestamp in messages:
-            with st.chat_message(role):
-                st.write(content)
-                st.caption(f"Sent at {timestamp[:16]}")
+        # Display existing messages first
+        with chat_container:
+            messages = db.get_messages(selected_session_id)
+            for role, content, timestamp in messages:
+                with st.chat_message(role):
+                    st.write(content)
+                    st.caption(f"Sent at {timestamp[:16]}")
 
-    # Then handle new messages
-    question = st.chat_input("Ask about your documents...")
-    if question:
-        # Check for files in session-specific directory
-        session_upload_dir = os.path.join(UPLOAD_DIR, selected_session_id)
-        if not os.path.exists(session_upload_dir) or not os.listdir(session_upload_dir):
-            st.error("Please upload some documents first!")
-        else:
-            with chat_container:
-                # Show user message
-                with st.chat_message("user"):
-                    st.write(question)
+        # Then handle new messages
+        question = st.chat_input("Ask about your documents...")
+        if question:
+            session_files = get_session_files(selected_session_id)
+            if not session_files:
+                st.error("Please upload some documents first!")
+            else:
+                with chat_container:
+                    # Show user message
+                    with st.chat_message("user"):
+                        st.write(question)
 
-                # Get and show AI response
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking..."):
-                        query_engine = query_engines.get(selected_session_id)
-                        if query_engine:
-                            response = query_engine.query(question)
-                            st.write(response)
+                    # Get and show AI response
+                    with st.chat_message("assistant"):
+                        with st.spinner("Thinking..."):
+                            query_engine = query_engines.get(selected_session_id)
+                            if not query_engine:
+                                # Reinitialize query engine if missing
+                                query_engine = QueryEngine(
+                                    os.getenv("GROQ_API_KEY"),
+                                    session_id=selected_session_id,
+                                )
+                                query_engines[selected_session_id] = query_engine
 
-                            # Store both messages
-                            db.add_message(selected_session_id, "user", question)
-                            db.add_message(selected_session_id, "assistant", response)
+                            # Force index rebuild if needed
+                            if not query_engine.index_manager.index:
+                                with st.status("Rebuilding document index..."):
+                                    query_engine.index_manager.build_index()
 
-                            # Suggest name for new conversations
-                            current_name = db.get_conversation_name(selected_session_id)
-                            if current_name == "New Conversation":
-                                suggested_name = db.suggest_conversation_name(
+                            if query_engine and query_engine.index_manager.index:
+                                response = query_engine.query(question)
+                                st.write(response)
+
+                                # Store both messages
+                                db.add_message(selected_session_id, "user", question)
+                                db.add_message(
+                                    selected_session_id, "assistant", response
+                                )
+
+                                # Suggest name for new conversations
+                                current_name = db.get_conversation_name(
                                     selected_session_id
                                 )
-                                db.update_conversation_name(
-                                    selected_session_id, suggested_name
+                                if current_name == "New Conversation":
+                                    suggested_name = db.suggest_conversation_name(
+                                        selected_session_id
+                                    )
+                                    db.update_conversation_name(
+                                        selected_session_id, suggested_name
+                                    )
+
+                                # Rerun to update chat history
+                                st.rerun()
+                            else:
+                                st.error(
+                                    "Session not initialized properly. Please try refreshing the page."
                                 )
-
-                            # Rerun to update chat history
-                            st.rerun()
-                        else:
-                            st.error(
-                                "Session not initialized properly. Please try refreshing the page."
-                            )
-
 
 with tab2:
     st.header("📖 Conversation History")
@@ -441,8 +496,6 @@ with tab2:
 st.markdown("</div>", unsafe_allow_html=True)
 
 # Sidebar Footer
-
-# Add some empty space in the sidebar to prevent content overlap
 st.sidebar.markdown("<br>" * 5, unsafe_allow_html=True)
 st.sidebar.markdown(
     """

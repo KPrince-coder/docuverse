@@ -3,7 +3,7 @@ import time
 from typing import List
 from llama_index.core import Settings
 from llama_index.llms.groq import Groq
-from utils.index_manager import IndexManager
+from .index_manager import IndexManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +31,23 @@ class QueryEngine:
     def __init__(self, groq_api_key, session_id: str = None):
         self.llm = None
         self.session_id = session_id
+        self.index_manager = IndexManager(
+            session_id=session_id
+        )  # Initialize index manager first
         self.initialize_llm(groq_api_key)
-        Settings.llm = self.llm
-        self.index_manager = IndexManager(session_id=session_id)
+        Settings.llm = self.llm  # Set LLM after initialization
         self._response_cache = {}
+        self._ensure_index()  # Add this method call
+
+    def _ensure_index(self):
+        """Ensure index is built or loaded."""
+        try:
+            if not self.index_manager.index:
+                self.index_manager.load_index()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to ensure index: {e}")
+            return False
 
     def initialize_llm(self, api_key: str, max_retries: int = 3) -> None:
         """Initialize the LLM with retries and error handling."""
@@ -109,6 +122,10 @@ class QueryEngine:
     def query(self, question: str) -> str:
         """Process query and return a response."""
         try:
+            # Ensure index exists
+            if not self._ensure_index():
+                return "Failed to initialize document index. Please try refreshing the page."
+
             # Check cache first
             cache_key = (
                 f"{self.session_id}_{hash(question)}"

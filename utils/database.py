@@ -122,8 +122,15 @@ class ConversationDB:
         self.conn.commit()
 
     def add_file(self, session_id, file_path, file_name):
-        """Tracks a file associated with a conversation."""
+        """Tracks a file associated with a conversation with session path verification."""
         try:
+            # Verify file path contains session ID
+            if session_id not in file_path:
+                logger.error(
+                    f"File path {file_path} does not match session {session_id}"
+                )
+                return False
+
             # Check if file already exists
             self.cursor.execute(
                 "SELECT COUNT(*) FROM files WHERE session_id = ? AND file_name = ?",
@@ -190,14 +197,16 @@ class ConversationDB:
         """Gets all files associated with a conversation."""
         self.cursor.execute(
             """
-            SELECT file_path, file_name 
+            SELECT DISTINCT file_path, file_name 
             FROM files 
             WHERE session_id = ?
             ORDER BY uploaded_at
             """,
             (session_id,),
         )
-        return self.cursor.fetchall()
+        files = self.cursor.fetchall()
+        # Filter out non-existent files
+        return [(fp, fn) for fp, fn in files if os.path.exists(fp)]
 
     def delete_conversation(self, session_id):
         """Deletes a conversation, its messages, and associated files."""
