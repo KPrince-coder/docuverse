@@ -53,7 +53,7 @@ class ConversationDB:
         """Creates a new conversation and returns its session ID."""
         session_id = f"session_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         created_at = datetime.now().isoformat()
-        default_name = "New Conversation"
+        default_name = "New Conversation"  # Changed from "✨New Conversation"
         self.cursor.execute(
             """
             INSERT INTO conversations (session_id, name, created_at, updated_at)
@@ -102,11 +102,32 @@ class ConversationDB:
         )
         first_message = self.cursor.fetchone()
         if first_message:
-            # Truncate and clean the message to create a title
-            name = first_message[0][:50].strip()
-            if len(first_message[0]) > 50:
-                name += "..."
-            return name
+            # Clean and format the message into a title
+            raw_title = first_message[0].strip()
+
+            # Remove common question starters
+            starters = [
+                "what is",
+                "how to",
+                "can you",
+                "please",
+                "tell me about",
+                "explain",
+            ]
+            for starter in starters:
+                if raw_title.lower().startswith(starter):
+                    raw_title = raw_title[len(starter) :].strip()
+
+            # Capitalize first letter of each word and limit length
+            title = " ".join(word.capitalize() for word in raw_title.split())
+            if len(title) > 50:
+                # Try to find a good breakpoint
+                breakpoint = title[:50].rfind(" ")
+                if breakpoint == -1:
+                    breakpoint = 50
+                title = title[:breakpoint].strip() + "..."
+
+            return f"💬 {title}"  # Add emoji prefix
         return "New Conversation"
 
     def add_message(self, session_id, role, content):

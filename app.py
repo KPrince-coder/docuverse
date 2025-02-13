@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import shutil
 import logging
+import time
 from datetime import datetime
 from utils.database import ConversationDB
 from utils.query_engine import QueryEngine
@@ -89,7 +90,6 @@ st.markdown(
 }
 
 .chat-messages {
-    margin-bottom: 80px;  /* Make space for fixed chat input */
     overflow-y: auto;
     padding-bottom: 2rem;
 }
@@ -168,10 +168,19 @@ if getattr(st.session_state, "show_rename", False):
         current_name = db.get_conversation_name(selected_session_id)
         suggested_name = db.suggest_conversation_name(selected_session_id)
 
+        st.markdown("##### Current name:")
+        st.code(current_name, language=None)
+
+        if suggested_name != "New Conversation" and current_name == "New Conversation":
+            st.markdown("##### Suggested name:")
+            st.success(suggested_name)
+
         new_name = st.text_input(
-            "Rename conversation:",
-            value=current_name,
-            placeholder=suggested_name,
+            "Enter new name:",
+            value=suggested_name
+            if suggested_name != "New Conversation"
+            else current_name,
+            placeholder="Enter a descriptive name...",
             key="new_conversation_name",
         )
 
@@ -461,15 +470,25 @@ with tab1:
                             db.add_message(selected_session_id, "user", question)
                             db.add_message(selected_session_id, "assistant", response)
 
-                            # Suggest name for new conversations
+                            # Update conversation name with better timing and feedback
                             current_name = db.get_conversation_name(selected_session_id)
-                            if current_name == "✨New Conversation":
+                            if current_name == "New Conversation":
                                 suggested_name = db.suggest_conversation_name(
                                     selected_session_id
                                 )
-                                db.update_conversation_name(
-                                    selected_session_id, suggested_name
-                                )
+                                if suggested_name != "New Conversation":
+                                    with st.status(
+                                        "✨ Generating conversation name...",
+                                        expanded=True,
+                                    ) as status:
+                                        db.update_conversation_name(
+                                            selected_session_id, suggested_name
+                                        )
+                                        status.update(
+                                            label=f"✨ Named conversation: {suggested_name}"
+                                        )
+                                        time.sleep(1)  # Brief pause to show the status
+                                        st.rerun()
 
                             # Rerun to update chat history
                             st.rerun()
