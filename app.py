@@ -347,9 +347,16 @@ with tab2:
     if not conversations:
         st.info("No conversations yet. Start a new conversation to begin!")
 
+    # Store selected conversation for viewing in session state
+    if "viewing_conversation" not in st.session_state:
+        st.session_state.viewing_conversation = None
+
     for session_id, created_at, msg_count, file_count, files in conversations:
         # Format the creation date
         created_date = datetime.fromisoformat(created_at).strftime("%B %d, %Y at %H:%M")
+
+        # Get conversation name
+        conv_name = db.get_conversation_name(session_id)
 
         # Create a container for each conversation
         with st.container():
@@ -357,7 +364,8 @@ with tab2:
                 f"""
             <div class="conversation-box">
                 <div class="conversation-header">
-                    <h3>Conversation from {created_date}</h3>
+                    <h3>{conv_name}</h3>
+                    <p style="color: #666; font-size: 0.9em;">{created_date}</p>
                 </div>
                 <p>📝 {msg_count} messages • 📎 {file_count} files</p>
                 <div class="file-list">
@@ -371,11 +379,11 @@ with tab2:
             col1, col2 = st.columns([4, 1])
             with col1:
                 if st.button("View Details", key=f"view_{session_id}"):
-                    messages = db.get_messages(session_id)
-                    for role, content, timestamp in messages:
-                        with st.chat_message(role):
-                            st.write(content)
-                            st.caption(f"Sent at {timestamp[:16]}")
+                    if st.session_state.viewing_conversation == session_id:
+                        st.session_state.viewing_conversation = None  # Toggle off
+                    else:
+                        st.session_state.viewing_conversation = session_id  # Toggle on
+                    st.rerun()
 
             with col2:
                 if st.button("🗑️ Delete", key=f"delete_{session_id}"):
@@ -383,6 +391,18 @@ with tab2:
                         st.session_state.selected_session_id = None
                     db.delete_conversation(session_id)
                     st.rerun()
+
+            # Show conversation details only if this conversation is selected for viewing
+            if st.session_state.viewing_conversation == session_id:
+                with st.expander("Conversation Details", expanded=True):
+                    messages = db.get_messages(session_id)
+                    if not messages:
+                        st.info("No messages in this conversation.")
+                    else:
+                        for role, content, timestamp in messages:
+                            with st.chat_message(role):
+                                st.write(content)
+                                st.caption(f"Sent at {timestamp[:16]}")
 
 # Close the main-content div
 st.markdown("</div>", unsafe_allow_html=True)
