@@ -11,7 +11,6 @@ headless = false  # Enable browser UI
 enableCORS = true  # Allow cross-origin requests
 enableXsrfProtection = true  # Protect against CSRF attacks
 # Disable file watcher for torch
-enableStaticServing = true
 fileWatcherType = "none"
 
 [ui]
