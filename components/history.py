@@ -13,13 +13,49 @@ def render_history(db):
     if "viewing_conversation" not in st.session_state:
         st.session_state.viewing_conversation = None
 
+    # Add custom CSS for better layout
+    st.markdown(
+        """
+        <style>
+        .conversation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;  /* Add space between name and date */
+        }
+        .conversation-name {
+            flex: 1;  /* Take available space */
+            min-width: 0;  /* Allow text truncation */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .conversation-date {
+            flex-shrink: 0;  /* Prevent date from shrinking */
+            color: #666;
+            font-size: 0.9em;
+        }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
+
     for session_id, created_at, msg_count, file_count, files in conv_details:
+        # Format the date like the chat screen
+        formatted_date = datetime.fromisoformat(created_at).strftime(
+            "%a, %b %d, %Y at %H:%M"
+        )
+
         st.markdown(
             f"""
             <div class="conversation-box">
                 <div class="conversation-header">
-                    <h3>{db.get_conversation_name(session_id)}</h3>
-                    <p style="color: #666; font-size: 0.9em;">{created_at}</p>
+                    <div class="conversation-name">
+                        <h3>{db.get_conversation_name(session_id)}</h3>
+                    </div>
+                    <div class="conversation-date">
+                        {formatted_date}
+                    </div>
                 </div>
                 <p>📝 {msg_count} messages • 📎 {file_count} files</p>
                 <div class="file-list">
