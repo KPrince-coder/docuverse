@@ -70,8 +70,7 @@ uv.lock
 cache/
 
 # Data
-data/conversations.db
-data/uploads/
+data/
 
 # Storage
 storage/
@@ -81,3 +80,8 @@ utils/models/
 
 # Secrets
 .streamlit/secrets.toml
+
+
+.trunk/
+
+.qodo/
