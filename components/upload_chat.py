@@ -3,9 +3,8 @@ import os
 import threading
 import time
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 
-from components.utils import (
+from .utils import (
     process_uploads,
     rerun_assistant_message,
     delete_chat_message_pair,
@@ -69,12 +68,62 @@ def render_upload_chat(session_id, db):
                     status.write(f"❌ Failed: {failed} files")
             st.success("Upload Complete")
 
-    # Display Uploaded Files
+    # Display Uploaded Files with delete option
     files = db.get_conversation_files(session_id)
     if files:
         st.subheader("📄 Uploaded Files")
+
+        # Initialize deletion states in session state if not present
+        if "pending_delete" not in st.session_state:
+            st.session_state.pending_delete = None
+
         for file_path, file_name in files:
-            st.text(f"• {file_name}")
+            col1, col2 = st.columns([6, 1])
+            with col1:
+                st.text(f"• {file_name}")
+            with col2:
+                delete_key = f"delete_{file_path}"
+
+                # Show confirmation buttons if this file is pending deletion
+                if st.session_state.pending_delete == file_path:
+                    confirm_col, cancel_col = st.columns(2)
+                    with confirm_col:
+                        if st.button("✓", key=f"confirm_{delete_key}"):
+                            try:
+                                # First remove file from disk
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                                # Then remove from database
+                                if db.delete_file(session_id, file_path):
+                                    # Trigger index rebuild in background
+                                    query_engine = st.session_state[
+                                        "query_engines"
+                                    ].get(session_id)
+                                    if query_engine:
+                                        threading.Thread(
+                                            target=query_engine.index_manager.build_index,
+                                            daemon=True,
+                                        ).start()
+                                    st.success(f"Deleted {file_name}")
+                                    # Clear the pending deletion state
+                                    st.session_state.pending_delete = None
+                                    time.sleep(
+                                        0.5
+                                    )  # Brief pause to show success message
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to delete from database")
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+                    with cancel_col:
+                        if st.button("×", key=f"cancel_{delete_key}"):
+                            st.session_state.pending_delete = None
+                            st.rerun()
+                else:
+                    # Show delete button
+                    if st.button("🗑️", key=delete_key):
+                        st.session_state.pending_delete = file_path
+                        st.rerun()
 
     # Chat Section: Group messages as pairs (user prompt and its AI response)
     st.subheader("💬 Chat")
