@@ -19,18 +19,19 @@ logger = logging.getLogger(__name__)
 
 @st.dialog("Save Note")
 def save_note_modal(db):
-    """Modal dialog for saving notes."""
+    """Modal dialog for saving notes with auto-generated title."""
     try:
-        # Generate default title with ISO format timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%dT%H%M")
-        default_title = f"Note_{timestamp}"
+        # Generate default title from user's question
+        user_question = st.session_state.note_to_save["user"]
+        default_title = generate_note_title(user_question)
 
-        # Allow user to edit title
+        # Allow user to edit title with auto-generated default
         note_title = st.text_input(
             "Note Title",
             value=default_title,
             placeholder="Enter a title for your note",
             key="note_title_input",
+            help="A title has been generated from your question. Feel free to modify it.",
         )
 
         file_type = st.selectbox(
@@ -42,7 +43,8 @@ def save_note_modal(db):
         with col_confirm:
             if st.button("Save", key="confirm_save_note"):
                 if not note_title:
-                    note_title = default_title  # Use default if empty
+                    st.error("Please enter a title for the note")
+                    return
 
                 saved_path = save_note_and_get_path(
                     st.session_state.note_to_save["user"],
