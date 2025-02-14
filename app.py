@@ -75,13 +75,16 @@ if st.session_state.get("show_rename") and selected_session_id:
         suggested_name = db.suggest_conversation_name(selected_session_id)
         st.markdown("##### Current name:")
         st.code(current_name, language=None)
-        if suggested_name != "New Conversation" and current_name == "New Conversation":
+        if (
+            suggested_name != "✨ New Conversation"
+            and current_name == "✨ New Conversation"
+        ):
             st.markdown("##### Suggested name:")
             st.success(suggested_name)
         new_name = st.text_input(
             "Enter new name:",
             value=suggested_name
-            if suggested_name != "New Conversation"
+            if suggested_name != "✨ New Conversation"
             else current_name,
             placeholder="Enter a descriptive name...",
             key="new_conversation_name",
@@ -100,7 +103,7 @@ if st.session_state.get("show_rename") and selected_session_id:
                 st.session_state["show_rename"] = False
                 st.rerun()
 
-if st.sidebar.button("Start New Conversation"):
+if st.sidebar.button("🎬 Start New Conversation"):
     if selected_session_id:
         try:
             session_storage = f"./storage/{selected_session_id}"
