@@ -70,6 +70,14 @@ class ConversationDB:
             )
         """)
         self.conn.commit()
+
+        # Add index for file paths to speed up deletion queries
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_files_path 
+            ON files(file_path);
+        """)
+        self.conn.commit()
+
         cursor.close()
 
     def create_conversation(self):
@@ -290,16 +298,6 @@ class ConversationDB:
         """Deletes a specific file from the database and disk."""
         try:
             cursor = self.conn.cursor()
-            cursor.execute(
-                "SELECT file_path FROM files WHERE session_id = ? AND file_path = ?",
-                (session_id, file_path),
-            )
-            if not cursor.fetchone():
-                logger.warning(f"File {file_path} not found in session {session_id}")
-                cursor.close()
-                return False
-            if os.path.exists(file_path):
-                os.remove(file_path)
             cursor.execute(
                 "DELETE FROM files WHERE session_id = ? AND file_path = ?",
                 (session_id, file_path),
