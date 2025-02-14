@@ -1,47 +1,76 @@
 import os
-from concurrent.futures import ThreadPoolExecutor
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import time
 import streamlit as st
 from utils.query_engine import QueryEngine
 
+logger = logging.getLogger(__name__)
+
 
 def handle_file_upload(uploaded_file, session_id, db):
-    """Handle file upload with optimized 1MB chunking."""
+    """Handle file upload with optimized chunking and async processing."""
     try:
         UPLOAD_DIR = "data/uploads"
         session_upload_dir = os.path.join(UPLOAD_DIR, session_id)
         os.makedirs(session_upload_dir, exist_ok=True)
         file_path = os.path.join(session_upload_dir, uploaded_file.name)
+
         if db.add_file(session_id, file_path, uploaded_file.name):
-            CHUNK_SIZE = 1024 * 1024  # 1MB
-            with open(file_path, "wb") as f:
-                while True:
-                    chunk = uploaded_file.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    f.write(chunk)
+            # Use a larger chunk size for better performance
+            CHUNK_SIZE = 1024 * 1024 * 4  # 4MB chunks
+
+            def write_chunks():
+                with open(file_path, "wb") as f:
+                    while chunk := uploaded_file.read(CHUNK_SIZE):
+                        f.write(chunk)
+
+            # Run file writing in thread pool
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(write_chunks)
+                future.result(timeout=300)  # 5 minute timeout
             return True
         return False
-    except Exception:
+    except Exception as e:
+        logger.error(f"Upload error: {e}")
         return False
 
 
 def process_uploads(files, session_id, db):
-    """Process multiple file uploads concurrently."""
+    """Process multiple file uploads with optimized concurrency."""
     results = []
-    with ThreadPoolExecutor(max_workers=min(len(files), 4)) as executor:
+    max_workers = min(len(files), os.cpu_count() * 2)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all file uploads
         futures = {
-            executor.submit(handle_file_upload, f, session_id, db): f for f in files
+            executor.submit(handle_file_upload, f, session_id, db): f.name
+            for f in files
         }
-        for future in futures:
-            results.append(future.result())
-    # Trigger background indexing so the user can interact immediately.
-    query_engine = st.session_state["query_engines"].get(session_id)
-    if query_engine:
-        threading.Thread(
-            target=query_engine.index_manager.build_index, daemon=True
-        ).start()
+
+        # Start index building in background while files upload
+        query_engine = st.session_state["query_engines"].get(session_id)
+        if query_engine:
+            index_thread = threading.Thread(
+                target=query_engine.index_manager.build_index, daemon=True
+            )
+            index_thread.start()
+
+        # Process upload results as they complete
+        for future in as_completed(futures):
+            file_name = futures[future]
+            try:
+                result = future.result(timeout=600)  # 10 minute timeout per file
+                results.append(result)
+                if result:
+                    logger.info(f"Successfully uploaded: {file_name}")
+                else:
+                    logger.error(f"Failed to upload: {file_name}")
+            except Exception as e:
+                logger.error(f"Upload failed for {file_name}: {e}")
+                results.append(False)
+
     return results
 
 

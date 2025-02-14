@@ -1,5 +1,7 @@
 import logging
 import time
+import concurrent.futures
+import threading
 from typing import List
 from llama_index.core import Settings
 from llama_index.llms.groq import Groq
@@ -38,8 +40,8 @@ Answer:
 
 """
 
-MODEL = "mixtral-8x7b-32768"
-# MODEL = "deepseek-r1-distill-llama-70b"
+# MODEL = "mixtral-8x7b-32768"
+MODEL = "deepseek-r1-distill-llama-70b"
 
 
 class QueryEngine:
@@ -51,7 +53,9 @@ class QueryEngine:
         )  # Initialize index manager first
         self.initialize_llm(groq_api_key)
         Settings.llm = self.llm  # Set LLM after initialization
+        self._query_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._response_cache = {}
+        self._cache_lock = threading.Lock()
         self._ensure_index()  # Ensure index is loaded or built
 
     def _ensure_index(self):
@@ -146,62 +150,68 @@ class QueryEngine:
         return "\n".join(formatted_history)
 
     def query(self, question: str, conversation_history: List[dict] = None) -> str:
-        """Process query with conversation history."""
+        """Process query with improved concurrency."""
         try:
-            # Ensure index exists
-            if not self._ensure_index():
-                return "Failed to initialize document index. Please try refreshing the page."
-
-            # Check cache first
+            # Check cache with thread safety
             cache_key = (
                 f"{self.session_id}_{hash(question)}"
                 if self.session_id
                 else hash(question)
             )
-            if cache_key in self._response_cache:
-                logger.info("Returning cached response")
-                return self._response_cache[cache_key]
+            with self._cache_lock:
+                if cache_key in self._response_cache:
+                    return self._response_cache[cache_key]
 
-            # Format conversation history
-            conv_history = self._format_conversation_history(conversation_history or [])
+            def _async_query():
+                # Ensure index exists
+                if not self._ensure_index():
+                    return "Failed to initialize document index. Please try refreshing the page."
 
-            # Get document context
-            retrieved_nodes = self.index_manager.query_index(question, top_k=5)
-            if not retrieved_nodes:
-                return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question."
+                # Format conversation history
+                conv_history = self._format_conversation_history(
+                    conversation_history or []
+                )
 
-            # Format document context
-            doc_context = self._format_context(retrieved_nodes)
+                # Get document context
+                retrieved_nodes = self.index_manager.query_index(question, top_k=5)
+                if not retrieved_nodes:
+                    return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question."
 
-            # Build prompt with both contexts
-            prompt = PROMPT_TEMPLATE.format(
-                conversation_history=conv_history,
-                context=doc_context,
-                question=question,
-            )
+                # Format document context
+                doc_context = self._format_context(retrieved_nodes)
 
-            # Get response from LLM with increased tokens
-            response = self.llm.complete(
-                prompt,
-                max_tokens=2000,  # Increased from 1000
-                temperature=0.3,
-            )
+                # Build prompt with both contexts
+                prompt = PROMPT_TEMPLATE.format(
+                    conversation_history=conv_history,
+                    context=doc_context,
+                    question=question,
+                )
 
-            # Cache and return response
-            result = response.text.strip()
-            self._response_cache[cache_key] = result
+                # Get response from LLM with increased tokens
+                response = self.llm.complete(
+                    prompt,
+                    max_tokens=2000,  # Increased from 1000
+                    temperature=0.3,
+                )
+
+                # Cache and return response
+                result = response.text.strip()
+                return result
+
+            # Run query in thread pool
+            future = self._query_pool.submit(_async_query)
+            result = future.result(timeout=30)  # 30 second timeout
+
+            # Cache result with thread safety
+            with self._cache_lock:
+                self._response_cache[cache_key] = result
             return result
 
+        except concurrent.futures.TimeoutError:
+            return "The request took too long to process. Please try again or try with a simpler question."
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error in query processing: {error_msg}", exc_info=True)
-
-            if "rate limit" in error_msg.lower():
-                return "I'm currently experiencing high demand. Please try again in a few moments."
-            elif "timeout" in error_msg.lower():
-                return "The request took too long to process. Please try again or try with a simpler question."
-            else:
-                return "I encountered an error processing your question. Please try again or contact support if the problem persists."
+            logger.error(f"Query error: {e}")
+            return "I encountered an error processing your question. Please try again."
 
     def evaluate_response(self, query: str, response: str, contexts: List[str]) -> dict:
         """Evaluates the response for faithfulness and relevancy."""
