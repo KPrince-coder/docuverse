@@ -1,8 +1,12 @@
 import os
+import logging
 from concurrent.futures import ThreadPoolExecutor
 import threading
+from datetime import datetime
 import streamlit as st
 from utils.query_engine import QueryEngine
+
+logger = logging.getLogger(__name__)
 
 
 def handle_file_upload(uploaded_file, session_id, db):
@@ -83,40 +87,104 @@ def delete_chat_message_pair(session_id, user_timestamp, assistant_timestamp, db
     return success_user and success_assistant
 
 
-def save_note_and_get_path(user_question, assistant_response, note_title, file_type):
-    """
-    Save a note that combines the user question as header and the assistant response.
-    Returns the path of the saved note, or None on error.
-    """
-    NOTES_DIR = "data/notes"
-    os.makedirs(NOTES_DIR, exist_ok=True)
-    filename = f"{note_title}.{file_type}"
-    file_path = os.path.join(NOTES_DIR, filename)
+def save_note_and_get_path(
+    user_question: str, assistant_response: str, note_title: str, file_type: str, db
+) -> str:
+    """Save a note with proper formatting."""
     try:
-        content = f"# {user_question}\n\n---\n\n{assistant_response}"
-        if file_type == "txt":
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
-        elif file_type == "pdf":
-            try:
-                from fpdf import FPDF
-            except ImportError:
+        NOTES_DIR = os.path.abspath("data/notes")
+        os.makedirs(NOTES_DIR, exist_ok=True)
+
+        # Clean up title and ensure valid filename
+        safe_title = "".join(
+            c for c in note_title if c.isalnum() or c in (" ", "-", "_")
+        ).strip()
+        filename = f"{safe_title}.{file_type}"  # Remove timestamp from filename
+        file_path = os.path.join(NOTES_DIR, filename)
+
+        # Content with proper formatting
+        formatted_content = f"""# {user_question}
+{assistant_response}"""
+
+        try:
+            if file_type == "txt":
+                with open(file_path, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(formatted_content)
+
+            elif file_type == "pdf":
+                try:
+                    from fpdf import FPDF
+
+                    pdf = FPDF()
+                    pdf.add_page()
+
+                    # Title (User Question)
+                    pdf.set_font("Arial", "B", size=16)
+                    # Split long titles into multiple lines
+                    pdf.multi_cell(0, 10, user_question)
+                    pdf.ln(10)
+
+                    # Content (Assistant Response)
+                    pdf.set_font("Arial", "", size=12)
+                    pdf.multi_cell(0, 10, assistant_response)
+
+                    pdf.output(file_path)
+                except ImportError:
+                    st.error(
+                        "PDF creation requires fpdf2. Please install it with: pip install fpdf2"
+                    )
+                    return None
+
+            elif file_type == "docx":
+                try:
+                    from docx import Document
+                    from docx.shared import Pt, RGBColor
+                    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+
+                    doc = Document()
+
+                    # Title (User Question)
+                    heading = doc.add_heading(level=1)
+                    heading_run = heading.add_run(user_question)
+                    heading_run.font.size = Pt(16)
+                    heading_run.font.bold = True
+                    heading.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+
+                    # Add some space
+                    doc.add_paragraph()
+
+                    # Content (Assistant Response)
+                    content_para = doc.add_paragraph()
+                    content_run = content_para.add_run(assistant_response)
+                    content_run.font.size = Pt(12)
+
+                    doc.save(file_path)
+                except ImportError:
+                    st.error(
+                        "DOCX creation requires python-docx. Please install it with: pip install python-docx"
+                    )
+                    return None
+
+            # Add note to database
+            if db.add_note(
+                title=safe_title,  # Use clean title without timestamp
+                content=formatted_content,
+                file_path=file_path,
+                file_type=file_type,
+                conversation_id=st.session_state.get("selected_session_id"),
+            ):
+                return file_path
+            else:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
                 return None
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            for line in content.split("\n"):
-                pdf.cell(200, 10, txt=line, ln=True)
-            pdf.output(file_path)
-        elif file_type == "docx":
-            try:
-                from docx import Document
-            except ImportError:
-                return None
-            document = Document()
-            document.add_heading(user_question, level=1)
-            document.add_paragraph(assistant_response)
-            document.save(file_path)
-        return file_path
-    except Exception:
+
+        except Exception as e:
+            logger.error(f"Error saving note file: {e}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return None
+
+    except Exception as e:
+        logger.error(f"Error in save_note_and_get_path: {e}")
         return None
