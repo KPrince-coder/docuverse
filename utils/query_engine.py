@@ -228,9 +228,11 @@ Instructions:
 4. Be consistent with previous responses
 5. If information conflicts with previous answers, explain the difference
 6. If the answer isn't in the context or previous conversation, say so
+7. Be universal and ready to do anything. Including quizing with the user, or even playing games.
 
 Answer: """
 
+# MODEL = "mixtral-8x7b-32768"
 MODEL = "deepseek-r1-distill-llama-70b"
 
 
