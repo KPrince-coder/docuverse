@@ -1,0 +1,114 @@
+/* Fixed header */
+.fixed-header {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    background: linear-gradient(90deg, #4facfe, #00f2fe);
+    color: white;
+    padding: 15px 20px;
+    font-size: 2em;
+    font-weight: bold;
+    text-align: center;
+    z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Chat messages container */
+.chat-messages {
+    overflow-y: auto;
+    max-height: 500px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+/* Inline action buttons: make them very small and remove borders */
+.inline-action button {
+    font-size: 0.7em !important;
+    background: none !important;
+    border: none !important;
+    padding: 0 2px !important;
+    margin-left: 5px;
+    color: #007bff;
+    cursor: pointer;
+}
+
+/* Styling for explicit action buttons if used */
+.action-buttons {
+    margin-top: 5px;
+}
+.action-buttons button {
+    margin-right: 5px;
+    padding: 4px 8px;
+    font-size: 0.8em;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.button-save {
+    background-color: #28a745;
+    color: white;
+}
+.button-rerun {
+    background-color: #ffc107;
+    color: black;
+}
+.button-delete {
+    background-color: #dc3545;
+    color: white;
+}
+
+/* Other existing styles */
+.conversation-box {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    background-color: #f8f9fa;
+}
+.conversation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.file-list {
+    color: #666;
+    font-size: 0.9em;
+    margin-top: 5px;
+}
+.sidebar-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 17rem;
+    background-color: rgb(240, 242, 246);
+    padding: 1rem 0;
+    text-align: center;
+    border-top: 1px solid #ddd;
+    z-index: 999;
+    font-size: 0.8em;
+    margin-bottom: 3rem;
+}
+.sidebar-footer hr {
+    margin: 0.5rem 1rem;
+    border: none;
+    border-top: 1px solid #ddd;
+}
+.sidebar-footer p {
+    margin: 0.5rem 0;
+    opacity: 0.7;
+}
+.main-content {
+    margin-bottom: 80px;
+    position: relative;
+}
+.fixed-chat-input {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem;
+    height: 8rem;
+    background: white;
+    z-index: 100;
+}
