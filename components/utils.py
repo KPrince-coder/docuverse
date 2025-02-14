@@ -1,75 +1,46 @@
 import os
-import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import streamlit as st
 from utils.query_engine import QueryEngine
 
-logger = logging.getLogger(__name__)
-
 
 def handle_file_upload(uploaded_file, session_id, db):
-    """Handle file upload with optimized chunking and async processing."""
+    """Handle file upload with optimized 1MB chunking."""
     try:
         UPLOAD_DIR = "data/uploads"
         session_upload_dir = os.path.join(UPLOAD_DIR, session_id)
         os.makedirs(session_upload_dir, exist_ok=True)
         file_path = os.path.join(session_upload_dir, uploaded_file.name)
-
         if db.add_file(session_id, file_path, uploaded_file.name):
-            # Use a larger chunk size for better performance
-            CHUNK_SIZE = 1024 * 1024 * 4  # 4MB chunks
-
-            def write_chunks():
-                with open(file_path, "wb") as f:
-                    while chunk := uploaded_file.read(CHUNK_SIZE):
-                        f.write(chunk)
-
-            # Run file writing in thread pool
-            with ThreadPoolExecutor() as executor:
-                future = executor.submit(write_chunks)
-                future.result(timeout=300)  # 5 minute timeout
+            CHUNK_SIZE = 1024 * 1024  # 1MB
+            with open(file_path, "wb") as f:
+                while True:
+                    chunk = uploaded_file.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    f.write(chunk)
             return True
         return False
-    except Exception as e:
-        logger.error(f"Upload error: {e}")
+    except Exception:
         return False
 
 
 def process_uploads(files, session_id, db):
-    """Process multiple file uploads with optimized concurrency."""
+    """Process multiple file uploads concurrently."""
     results = []
-    max_workers = min(len(files), os.cpu_count() * 2)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all file uploads
+    with ThreadPoolExecutor(max_workers=min(len(files), 4)) as executor:
         futures = {
-            executor.submit(handle_file_upload, f, session_id, db): f.name
-            for f in files
+            executor.submit(handle_file_upload, f, session_id, db): f for f in files
         }
-
-        # Start index building in background while files upload
-        query_engine = st.session_state["query_engines"].get(session_id)
-        if query_engine:
-            index_thread = threading.Thread(
-                target=query_engine.index_manager.build_index, daemon=True
-            )
-            index_thread.start()
-
-        # Process upload results as they complete
-        for future in as_completed(futures):
-            file_name = futures[future]
-            try:
-                result = future.result(timeout=600)  # 10 minute timeout per file
-                results.append(result)
-                if result:
-                    logger.info(f"Successfully uploaded: {file_name}")
-                else:
-                    logger.error(f"Failed to upload: {file_name}")
-            except Exception as e:
-                logger.error(f"Upload failed for {file_name}: {e}")
-                results.append(False)
-
+        for future in futures:
+            results.append(future.result())
+    # Trigger background indexing so the user can interact immediately.
+    query_engine = st.session_state["query_engines"].get(session_id)
+    if query_engine:
+        threading.Thread(
+            target=query_engine.index_manager.build_index, daemon=True
+        ).start()
     return results
 
 
@@ -113,78 +84,39 @@ def delete_chat_message_pair(session_id, user_timestamp, assistant_timestamp, db
 
 
 def save_note_and_get_path(user_question, assistant_response, note_title, file_type):
-    """Save a note with database integration."""
+    """
+    Save a note that combines the user question as header and the assistant response.
+    Returns the path of the saved note, or None on error.
+    """
     NOTES_DIR = "data/notes"
     os.makedirs(NOTES_DIR, exist_ok=True)
-
-    # Get database connection
-    db = st.session_state.get("db")
-    if not db:
-        st.error("Database connection not available")
-        return None
-
+    filename = f"{note_title}.{file_type}"
+    file_path = os.path.join(NOTES_DIR, filename)
     try:
-        # Clean up title for filename
-        safe_title = "".join(
-            c for c in note_title if c.isalnum() or c in (" ", "-", "_")
-        ).rstrip()
-        filename = f"{safe_title}.{file_type}"
-        file_path = os.path.join(NOTES_DIR, filename)
-
         content = f"# {user_question}\n\n---\n\n{assistant_response}"
-
-        # Save the file based on type
         if file_type == "txt":
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
         elif file_type == "pdf":
             try:
                 from fpdf import FPDF
-
-                pdf = FPDF()
-                pdf.add_page()
-                pdf.set_font("Arial", size=12)
-                for line in content.split("\n"):
-                    pdf.cell(200, 10, txt=line, ln=True)
-                pdf.output(file_path)
             except ImportError:
-                st.error(
-                    "FPDF library not installed. Please install fpdf2 to save as PDF."
-                )
                 return None
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            for line in content.split("\n"):
+                pdf.cell(200, 10, txt=line, ln=True)
+            pdf.output(file_path)
         elif file_type == "docx":
             try:
                 from docx import Document
-
-                document = Document()
-                document.add_heading(user_question, level=1)
-                document.add_paragraph(assistant_response)
-                document.save(file_path)
             except ImportError:
-                st.error(
-                    "python-docx not installed. Please install python-docx to save as DOCX."
-                )
                 return None
-
-        # Add note to database
-        success = db.add_note(
-            title=note_title,
-            content=content,
-            file_path=file_path,
-            file_type=file_type,
-            conversation_id=st.session_state.get("selected_session_id"),
-        )
-
-        if success:
-            return file_path
-        else:
-            if os.path.exists(file_path):
-                os.remove(file_path)  # Clean up file if database operation failed
-            return None
-
-    except Exception as e:
-        st.error(f"Error saving note: {e}")
-        # Clean up file if it was created
-        if "file_path" in locals() and os.path.exists(file_path):
-            os.remove(file_path)
+            document = Document()
+            document.add_heading(user_question, level=1)
+            document.add_paragraph(assistant_response)
+            document.save(file_path)
+        return file_path
+    except Exception:
         return None
