@@ -2,7 +2,6 @@ import os
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-import time
 import streamlit as st
 from utils.query_engine import QueryEngine
 
