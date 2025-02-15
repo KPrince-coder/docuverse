@@ -16,6 +16,23 @@ from .utils import (
 # Configure logger
 logger = logging.getLogger(__name__)
 
+# Update the file uploader supported types
+SUPPORTED_FILE_TYPES = [
+    "txt",
+    "md",
+    "pdf",
+    "docx",  # Text and Documents
+    "ppt",
+    "pptm",
+    "pptx",  # Presentations
+    "csv",  # Data files
+    "epub",  # Ebooks
+    "hwp",  # Korean word processor
+    "ipynb",  # Jupyter notebooks
+    "mbox",  # Email archives
+    "json",  # JSON (handled separately)
+]
+
 
 @st.dialog("Save Note")
 def save_note_modal(db):
@@ -176,6 +193,7 @@ def render_upload_chat(session_id, db):
     st.subheader("📂 Upload Files")
     uploaded_files = st.file_uploader(
         "Upload documents to chat about",
+        type=SUPPORTED_FILE_TYPES,
         accept_multiple_files=True,
         key=f"uploader_{session_id}",
     )
