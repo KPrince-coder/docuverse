@@ -6,7 +6,6 @@ import pymupdf  # Correct import for PyMuPDF
 from docx import Document
 import logging
 from datetime import datetime
-import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,39 +35,49 @@ class FileReader:
 
     @staticmethod
     def read_pdf(file_path: str) -> Tuple[Optional[str], Optional[str]]:
-        """Read content from a PDF file.
-
-        Args:
-            file_path: Path to the PDF file
-
-        Returns:
-            Tuple of (content, error_message)
-        """
+        """Read content from a PDF file with proper formatting."""
         try:
             pdf_content = []
             doc = pymupdf.open(file_path)
+
+            # Get the first line as title (which was saved as larger, bold text)
+            first_page = doc[0]
+            title = first_page.get_text(
+                "text", clip=(50, 0, first_page.rect.width - 50, 100)
+            ).strip()
+
+            # Get rest of content
             for page in doc:
-                pdf_content.append(page.get_text())
+                content = page.get_text()
+                # Remove the title from first page content to avoid duplication
+                if page.number == 0:
+                    content = content.replace(title, "", 1)
+                pdf_content.append(content.strip())
+
             doc.close()
-            return "\n\n".join(pdf_content), None
+
+            # Format content with markdown for consistent display
+            formatted_content = f"# {title}\n\n{''.join(pdf_content)}"
+            return formatted_content, None
         except Exception as e:
             logger.error(f"Error reading PDF file {file_path}: {e}")
             return None, f"Error reading PDF file: {str(e)}"
 
     @staticmethod
     def read_docx(file_path: str) -> Tuple[Optional[str], Optional[str]]:
-        """Read content from a DOCX file.
-
-        Args:
-            file_path: Path to the DOCX file
-
-        Returns:
-            Tuple of (content, error_message)
-        """
+        """Read content from a DOCX file with proper formatting."""
         try:
             doc = Document(file_path)
-            content = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-            return content, None
+
+            # Extract title from first heading
+            title = doc.paragraphs[0].text if doc.paragraphs else ""
+
+            # Get rest of content
+            content = "\n".join(p.text for p in doc.paragraphs[1:])
+
+            # Format content with markdown for consistent display
+            formatted_content = f"# {title}\n\n{content}"
+            return formatted_content, None
         except Exception as e:
             logger.error(f"Error reading DOCX file {file_path}: {e}")
             return None, f"Error reading DOCX file: {str(e)}"
@@ -138,9 +147,26 @@ def render_notes():
             if error:
                 st.error(error)
             else:
-                # Show the content in the UI
-                # For large PDFs/docx, consider a text area or other approach
-                st.markdown(file_content)
+                # Display note content with consistent formatting
+                if file_content:
+                    try:
+                        # Split content into title and body based on markdown formatting
+                        parts = file_content.split("\n\n", 1)
+                        if len(parts) == 2:
+                            title_line, body = parts
+                            # Display title with large, bold formatting
+                            st.markdown(
+                                f"<h2>{title_line.replace('#', '').strip()}</h2>",
+                                unsafe_allow_html=True,
+                            )
+                            # Display body with normal formatting
+                            st.markdown(body)
+                        else:
+                            # Fallback if content doesn't match expected format
+                            st.markdown(file_content)
+                    except Exception as e:
+                        logger.error(f"Error formatting note content: {e}")
+                        st.markdown(file_content)
 
             # Action buttons in columns
             col1, col2, col3 = st.columns(3)
@@ -192,7 +218,9 @@ def render_notes():
                     # Show confirmation buttons
                     confirm_col, cancel_col = st.columns(2)
                     with confirm_col:
-                        if st.button("✓", key=f"confirm_delete_{file_path}"):
+                        if st.button(
+                            "✓", key=f"confirm_delete_{file_path}", help="Confirm"
+                        ):
                             try:
                                 # Delete file from disk first
                                 if os.path.exists(file_path):
@@ -211,10 +239,12 @@ def render_notes():
                                 logger.error(f"Error deleting note: {e}")
                                 st.error(f"Failed to delete note: {str(e)}")
                     with cancel_col:
-                        if st.button("×", key=f"cancel_delete_{file_path}"):
+                        if st.button(
+                            "×", key=f"cancel_delete_{file_path}", help="Cancel"
+                        ):
                             st.session_state.pending_note_deletion = None
                             st.rerun()
                 else:
-                    if st.button("🗑️", key=f"delete_{file_path}"):
+                    if st.button("🗑️ Delete", key=f"delete_{file_path}"):
                         st.session_state.pending_note_deletion = file_path
                         st.rerun()
