@@ -2,7 +2,6 @@ import os
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import threading
-from datetime import datetime
 import streamlit as st
 from utils.query_engine import QueryEngine
 
@@ -138,7 +137,7 @@ def save_note_and_get_path(
             elif file_type == "docx":
                 try:
                     from docx import Document
-                    from docx.shared import Pt, RGBColor
+                    from docx.shared import Pt
                     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
                     doc = Document()
