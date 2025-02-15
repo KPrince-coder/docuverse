@@ -18,8 +18,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="auto",
     menu_items={
-        "Get Help": "https://github.com/yourusername/docuverse",
-        "Report a bug": "https://github.com/yourusername/docuverse/issues",
+        "Get Help": "https://github.com/KPrince-coder/docuverse#readme",
+        "Report a bug": "https://github.com/KPrince-coder/docuverse/issues",
         "About": "# DocuVerse\nYour Document Intelligence Assistant",
     },
 )
@@ -169,7 +169,7 @@ st.sidebar.markdown(
     <div class="sidebar-footer">
         <hr>
         <p>
-            Made with ❤️ by DocuVerse Team
+            Made with ❤️ by Prince Kyeremeh
         </p>
     </div>
     """,
