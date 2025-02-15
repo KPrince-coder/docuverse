@@ -31,7 +31,14 @@ with open("components/style.css", "r") as css_file:
 # Render the sticky header
 render_header()
 
-# Set API key from secrets
+# Add error handling for API key
+if "GROQ_API_KEY" not in st.secrets:
+    st.error(
+        "Missing GROQ_API_KEY in secrets. Please add it to your .streamlit/secrets.toml file or Streamlit Cloud secrets."
+    )
+    st.stop()
+
+# Set API key from secrets with error handling
 os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
 # Initialize database and query engine container in session state
