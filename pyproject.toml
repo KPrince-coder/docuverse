@@ -1,9 +1,31 @@
 [project]
 name = "docuverse"
 version = "0.1.0"
-description = "Add your description here"
+description = """
+DocuVerse is an intelligent document interaction platform that enables natural language conversations 
+with documents using AI. Upload documents in various formats and engage in meaningful dialogue, 
+extract insights, and save important information as notes.
+"""
+authors = [
+    {name = "Prince Kyeremeh", email = "kyeremehprince68@gmail.com"},
+    {name = "Prince Kyeremeh", email = "kyeremehprince68@gmail.com"},
+]
 readme = "README.md"
 requires-python = ">=3.13"
+license = {text = "MIT"}
+keywords = ["document-ai", "chat", "nlp", "llm", "streamlit"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing :: General",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
 dependencies = [
     "docx2txt>=0.8",
     "fpdf2>=2.8.2",
@@ -20,3 +42,12 @@ dependencies = [
     "torch>=2.6.0",
     "transformers>=4.48.3",
 ]
+
+
+[project.urls]
+Homepage = "https://github.com/yourusername/docuverse"
+Documentation = "https://github.com/yourusername/docuverse/docs"
+Repository = "https://github.com/yourusername/docuverse.git"
+"Bug Tracker" = "https://github.com/yourusername/docuverse/issues"
+
+
