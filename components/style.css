@@ -11,6 +11,8 @@
     text-align: center;
     z-index: 1000;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    margin-bottom:4rem;
+    border-radius: 10px;
 }
 
 /* Chat messages container */
