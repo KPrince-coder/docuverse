@@ -63,8 +63,6 @@ MANIFEST
 .*.swp
 .DS_Store
 
-# Uv lock file
-uv.lock
 
 # Streamlit cache
 cache/
