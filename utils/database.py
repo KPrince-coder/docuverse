@@ -356,8 +356,8 @@ class ConversationDB:
         cursor.close()
         return notes
 
-    def delete_note(self, file_path: str):
-        """Delete a note by its file path."""
+    def delete_note(self, file_path: str) -> bool:
+        """Delete a note from the database."""
         try:
             cursor = self.conn.cursor()
             cursor.execute("DELETE FROM notes WHERE file_path = ?", (file_path,))
@@ -365,7 +365,8 @@ class ConversationDB:
             cursor.close()
             return True
         except Exception as e:
-            logger.error(f"Error deleting note: {e}")
+            logger.error(f"Error deleting note from database: {e}")
+            self.conn.rollback()
             return False
 
     def update_note_title(self, file_path: str, new_title: str):
