@@ -14,8 +14,11 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better cache utilization
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Create a virtual environment
+RUN python -m venv /venv
+
+# Install Python dependencies inside the virtual environment
+RUN /venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
@@ -34,5 +37,5 @@ ENV STREAMLIT_SERVER_ADDRESS=localhost
 # Health check
 HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
 
-# Run the application
-ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.headless=true"]
+# Run the application using the virtual environment
+ENTRYPOINT ["/venv/bin/streamlit", "run", "app.py", "--server.port=8501", "--server.headless=true"]
