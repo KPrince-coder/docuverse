@@ -7,7 +7,7 @@ font = "sans serif"  # Clean, modern font
 
 [server]
 runOnSave = true  # Turn off automatic rerun on save
-headless = false  # Enable browser UI
+headless = true  # Enable browser UI
 enableCORS = true  # Allow cross-origin requests
 port = 8501# Change the default port if needed
 
