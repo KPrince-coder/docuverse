@@ -1,6 +1,9 @@
 import streamlit as st
 import os
 
+import threading
+import time
+
 from datetime import datetime
 
 from components.utils import (
@@ -86,12 +89,52 @@ def render_upload_chat(session_id, db):
                     status.write(f"❌ Failed: {failed} files")
             st.success("Upload Complete")
 
-    # Display Uploaded Files
+    # Display Uploaded Files Section
     files = db.get_conversation_files(session_id)
     if files:
         st.subheader("📄 Uploaded Files")
+        if "pending_delete" not in st.session_state:
+            st.session_state.pending_delete = None
+
         for file_path, file_name in files:
-            st.text(f"• {file_name}")
+            col1, col2 = st.columns([6, 1])
+            with col1:
+                st.text(f"• {file_name}")
+            with col2:
+                delete_key = f"delete_{file_path}"
+
+                if st.session_state.pending_delete == file_path:
+                    confirm_col, cancel_col = st.columns(2)
+                    with confirm_col:
+                        if st.button("✓", key=f"confirm_{delete_key}"):
+                            try:
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                                if db.delete_file(session_id, file_path):
+                                    query_engine = st.session_state[
+                                        "query_engines"
+                                    ].get(session_id)
+                                    if query_engine:
+                                        threading.Thread(
+                                            target=query_engine.index_manager.build_index,
+                                            daemon=True,
+                                        ).start()
+                                    st.success(f"Deleted {file_name}")
+                                    st.session_state.pending_delete = None
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to delete from database")
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+                    with cancel_col:
+                        if st.button("×", key=f"cancel_{delete_key}"):
+                            st.session_state.pending_delete = None
+                            st.rerun()
+                else:
+                    if st.button("🗑️", key=delete_key):
+                        st.session_state.pending_delete = file_path
+                        st.rerun()
 
     # Chat Section: Group messages as pairs (user prompt and its AI response)
     st.subheader("💬 Chat")
