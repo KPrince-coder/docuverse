@@ -1,110 +1,62 @@
-# Docuverse
+# DocuVerse
 
-## Overview
-
-Docuverse is a Streamlit application that allows users to upload documents, query them using a Large Language Model (LLM), and have conversations with the documents. It uses Langchain to interact with LLMs and ChromaDB for vector storage.
-
-## UI
-
-Coming soon...
+DocuVerse is an intelligent document management and analysis platform that allows users to interact with their documents through natural language queries. Built with Streamlit, Python, and modern AI technologies, it provides an intuitive interface for document processing, querying, and analysis.
 
 ## Features
 
-* **Document Upload:** Users can upload documents in various formats (e.g., PDF, TXT, CSV).
-* **Querying:** Users can query the uploaded documents using natural language.
-* **Conversational Interface:** Users can have conversations with the documents, asking follow-up questions and getting more detailed answers.
-* **Data Visualization:** The application can display data from uploaded CSV files.
+* **Document upload and processing (PDF, TXT, CSV)**: Allows users to upload documents in various formats and process them for analysis.
+* **Natural language querying**: Enables users to ask questions about their documents using natural language.
+* **Conversation history management**: Stores and manages conversation history for future reference.
+* **Note-taking functionality**: Provides a built-in note-taking feature for users to capture insights and ideas.
+* **Data visualization for CSV files**: Allows users to visualize data from CSV files using charts and graphs.
 
-## Technologies Used
+## Documentation
 
-* **Streamlit:** A Python library for creating interactive web applications.
-* **Langchain:** A framework for developing applications powered by language models.
-* **ChromaDB:** A vector database for storing and retrieving document embeddings.
-* **Sentence Transformers:** A library for generating sentence embeddings.
-* **Python:** The programming language used to develop the application.
+* [Getting Started](docs/getting_started.md): Provides instructions on how to install and configure DocuVerse.
+* [User Guide](docs/user_guide.md): Explains how to use the DocuVerse application.
+* [Technical Documentation](docs/technical_docs/architecture.md): Describes the system architecture and components.
+* [API Documentation](docs/technical_docs/apis.md): Provides documentation for the external APIs used by DocuVerse.
+* [Database Documentation](docs/technical_docs/database.md): Describes the database schema and operations.
+* [Components Documentation](docs/technical_docs/components.md): Provides documentation for the Streamlit components used in the application.
+* [Deployment Guide](docs/deployment.md): Provides instructions on how to deploy DocuVerse to production.
+* [Troubleshooting](docs/troubleshooting.md): Provides solutions to common issues and problems.
+* [Contributing Guidelines](docs/contributing.md): Provides guidelines for contributing to the DocuVerse project.
 
-## File Structure
-
-```markdown
-.
-├── .streamlit/
-│   ├── config.toml       # Streamlit configuration file
-│   └── secrets.toml      # Streamlit secrets file
-├── app.py                # Main Streamlit application file
-├── cache/                # Directory for caching data
-├── data/                 # Directory for storing data
-│   ├── conversations.db  # Database for storing conversations
-│   ├── Gemini_(chatbot).pdf # Example PDF document
-│   ├── uploads/          # Directory for storing uploaded documents
-│   └── world_population.csv # Example CSV file
-├── README.md             # This file
-├── styles.css            # Custom CSS styles for the application
-├── utils/                # Directory for utility modules
-│   ├── __init__.py       # Initialization file for the utils package
-│   ├── database.py       # Module for database operations
-│   ├── index_manager.py  # Module for managing document indexes
-│   ├── models/           # Directory for storing models
-│   │   └── models--BAAI--bge-small-en/ # Model files
-│   └── query_engine.py   # Module for querying documents
-├── pyproject.toml        # Project configuration file
-└── uv.lock               # Lock file for uv package manager
-```
-
-## Installation
+## Quick Start
 
 1. Clone the repository:
 
     ```bash
-    git clone <repository_url>
+    git clone https://github.com/KPrince-coder/docuverse.git
     ```
 
 2. Navigate to the project directory:
 
     ```bash
-    cd <project_directory>
+    cd docuverse
     ```
 
-3. Install the dependencies using uv:
+3. Install dependencies:
 
     ```bash
     uv sync
     ```
 
-## Usage
+4. Configure environment variables in `.streamlit/secrets.toml`:
 
-1. Run the Streamlit application:
+    * Set the `GROQ_API_KEY` in `.streamlit/secrets.toml`.
+5. Run the application:
 
     ```bash
     streamlit run app.py
     ```
 
-2. Open the application in your browser at the URL displayed in the terminal.
-3. Upload documents using the file upload widget.
-4. Query the documents using the text input widget.
-5. Have conversations with the documents by asking follow-up questions.
+## Requirements
 
-## Configuration
-
-The application can be configured using the `.streamlit/config.toml` and `.streamlit/secrets.toml` files.
-
-* `.streamlit/config.toml`: Contains Streamlit configuration options.
-* `.streamlit/secrets.toml`: Contains sensitive information such as API keys.
-
-## Data Storage
-
-The application stores data in the `data/` directory.
-
-* `data/conversations.db`: Stores the conversations between the user and the documents.
-* `data/uploads/`: Stores the uploaded documents.
-
-## Models
-
-The application uses the `BAAI/bge-small-en` sentence transformer model, which is stored in the `utils/models/` directory.
-
-## Contributing
-
-Contributions are welcome! Please submit a pull request with your changes.
+* Python 3.8+
+* Streamlit
+* GROQ API key
 
 ## License
 
-[MIT](LICENSE)
+MIT License - See [LICENSE](LICENSE) for details
