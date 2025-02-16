@@ -32,8 +32,42 @@ with open("components/style.css", "r") as css_file:
 # Render the sticky header
 render_header()
 
-# Sidebar: API Key Management
+# Define available models
+AVAILABLE_MODELS = [
+    "mixtral-8x7b-32768",  # default
+    "deepseek-r1-distill-llama-70b",
+    "llama-3.3-70b-versatile",
+    "llama-3.3-70b-specdec",
+    "llama-3.2-1b-preview",
+    "llama-3.2-3b-preview",
+    "llama-3.1-8b-instant",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
+    "llama-guard-3-8b",
+    "gemma2-9b-it",
+]
+
+# Sidebar: API Key Management and Model Selection
 st.sidebar.title("📚 DocuVerse")
+
+# Model Selection
+with st.sidebar.expander("🤖 Model Selection", expanded=False):
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = "mixtral-8x7b-32768"
+
+    selected_model = st.selectbox(
+        "Choose LLM Model",
+        options=AVAILABLE_MODELS,
+        index=AVAILABLE_MODELS.index(st.session_state.selected_model),
+        help="Select the model to use for chat responses",
+    )
+
+    if selected_model != st.session_state.selected_model:
+        st.session_state.selected_model = selected_model
+        # Clear existing query engines to force reinitialization with new model
+        st.session_state["query_engines"] = {}
+        st.success(f"Model changed to {selected_model}")
+        st.rerun()
 
 # API Key Management section
 with st.sidebar.expander(
@@ -164,9 +198,12 @@ if st.sidebar.button("🎬 Start New Conversation"):
     selected_session_id = db.create_conversation()
     st.rerun()
 
+# Modify the QueryEngine initialization to use the selected model
 if selected_session_id and selected_session_id not in st.session_state["query_engines"]:
     st.session_state["query_engines"][selected_session_id] = QueryEngine(
-        os.getenv("GROQ_API_KEY"), session_id=selected_session_id
+        os.getenv("GROQ_API_KEY"),
+        session_id=selected_session_id,
+        model=st.session_state.selected_model,
     )
 
 
