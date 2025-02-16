@@ -3,6 +3,7 @@ import os
 import shutil
 import logging
 
+
 from components.header import render_header
 from components.upload_chat import render_upload_chat
 from components.history import render_history
@@ -31,15 +32,53 @@ with open("components/style.css", "r") as css_file:
 # Render the sticky header
 render_header()
 
-# Add error handling for API key
-if "GROQ_API_KEY" not in st.secrets:
-    st.error(
-        "Missing GROQ_API_KEY in secrets. Please add it to your .streamlit/secrets.toml file or Streamlit Cloud secrets."
+# Sidebar: API Key Management
+st.sidebar.title("📚 DocuVerse")
+
+# API Key Management section
+with st.sidebar.expander(
+    "🔑 API Key Management", expanded="GROQ_API_KEY" not in st.secrets
+):
+    if "api_key" not in st.session_state:
+        st.session_state.api_key = st.secrets.get("GROQ_API_KEY", "")
+
+    if not st.session_state.api_key:
+        st.warning("Please enter your GROQ API key to use the chat feature.")
+        st.markdown("Get your API key from [GROQ Console](https://console.groq.com)")
+
+    # API Key input with password mask
+    new_api_key = st.text_input(
+        "GROQ API Key",
+        value=st.session_state.api_key,
+        type="password",
+        help="Enter your GROQ API key to enable chat functionality",
     )
+
+    # Save/Update button
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("💾 Save Key"):
+            if new_api_key and new_api_key != st.session_state.api_key:
+                st.session_state.api_key = new_api_key
+                os.environ["GROQ_API_KEY"] = new_api_key
+                st.success("API key saved!")
+                st.rerun()
+
+    with col2:
+        if st.button("🗑️ Clear Key"):
+            st.session_state.api_key = ""
+            if "GROQ_API_KEY" in os.environ:
+                del os.environ["GROQ_API_KEY"]
+            st.warning("API key cleared!")
+            st.rerun()
+
+# Replace the original API key check with the new session state check
+if not st.session_state.get("api_key"):
+    st.error("Please add your GROQ API key in the sidebar to use the chat feature.")
     st.stop()
 
-# Set API key from secrets with error handling
-os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+# Set API key from session state
+os.environ["GROQ_API_KEY"] = st.session_state.api_key
 
 # Initialize database and query engine container in session state
 if "query_engines" not in st.session_state:
@@ -56,7 +95,6 @@ db = ConversationDB()
 st.session_state["db"] = db
 
 # Sidebar: Conversation management
-st.sidebar.title("📚 DocuVerse")
 conversations = db.get_conversations()
 selected_session_id = None
 if conversations:
