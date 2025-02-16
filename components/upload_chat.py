@@ -11,6 +11,24 @@ from components.utils import (
 )
 
 
+# Supported file types for uploader
+SUPPORTED_FILE_TYPES = [
+    "txt",
+    "md",
+    "pdf",
+    "docx",  # Text and Documents
+    "ppt",
+    "pptm",
+    "pptx",  # Presentations
+    "csv",  # Data files
+    "epub",  # Ebooks
+    "hwp",  # Korean word processor
+    "ipynb",  # Jupyter notebooks
+    "mbox",  # Email archives
+    "json",  # JSON (handled separately)
+]
+
+
 # Define the modal using the st.dialog decorator.
 @st.dialog("Save Note")
 def save_note_modal():
@@ -45,13 +63,6 @@ def render_upload_chat(session_id, db):
         st.warning("Please start a new conversation before uploading files.")
         return
 
-    # Check for API key before allowing chat
-    if not st.session_state.get("api_key"):
-        st.warning(
-            "Please enter your GROQ API key in the sidebar to use the chat feature."
-        )
-        return
-
     UPLOAD_DIR = "data/uploads"
     os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -59,6 +70,7 @@ def render_upload_chat(session_id, db):
     uploaded_files = st.file_uploader(
         "Upload documents to chat about",
         accept_multiple_files=True,
+        type=SUPPORTED_FILE_TYPES,
         key=f"uploader_{session_id}",
     )
     if uploaded_files:

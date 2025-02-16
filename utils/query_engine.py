@@ -40,23 +40,21 @@ Answer:
 
 """
 
-# MODEL = "mixtral-8x7b-32768"
-MODEL = "deepseek-r1-distill-llama-70b"
-
 
 class QueryEngine:
-    def __init__(self, groq_api_key, session_id: str = None):
+    def __init__(
+        self, groq_api_key, session_id: str = None, model: str = "mixtral-8x7b-32768"
+    ):
         self.llm = None
         self.session_id = session_id
-        self.index_manager = IndexManager(
-            session_id=session_id
-        )  # Initialize index manager first
+        self.model = model
+        self.index_manager = IndexManager(session_id=session_id)
         self.initialize_llm(groq_api_key)
-        Settings.llm = self.llm  # Set LLM after initialization
+        Settings.llm = self.llm
         self._query_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._response_cache = {}
         self._cache_lock = threading.Lock()
-        self._ensure_index()  # Ensure index is loaded or built
+        self._ensure_index()
 
     def _ensure_index(self):
         """Ensure index is built or loaded."""
@@ -76,12 +74,14 @@ class QueryEngine:
         while retry_count < max_retries:
             try:
                 self.llm = Groq(
-                    model=MODEL,
+                    model=self.model,  # Use the selected model
                     api_key=api_key,
                     temperature=0.3,
                     max_tokens=2048,
                 )
-                logger.info("Successfully initialized Groq LLM")
+                logger.info(
+                    f"Successfully initialized Groq LLM with model {self.model}"
+                )
                 return
             except Exception as e:
                 retry_count += 1
