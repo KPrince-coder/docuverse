@@ -71,6 +71,29 @@ The conversation history feature allows you to:
 3. **Delete old conversations:** Remove conversations that are no longer needed to keep your history organized.
 4. **View history:** Review the complete history of your conversations, including questions and responses.
 
+## Model Selection
+
+DocuVerse supports multiple LLM models through GROQ. To select a model:
+
+1. Open the "🤖 Model Selection" section in the sidebar
+2. Choose from available models:
+   * mixtral-8x7b-32768 (default)
+   * deepseek-r1-distill-llama-70b
+   * llama-3.3-70b-versatile
+   * llama-3.3-70b-specdec
+   * And more...
+
+The model selection will persist during your session. Changing models will clear existing conversations to ensure consistency.
+
+## API Key Management
+
+1. Open the "🔑 API Key Management" section in the sidebar
+2. Enter your GROQ API key
+3. Click "💾 Save Key" to store the key
+4. Use "🗑️ Clear Key" to remove the stored key
+
+Your API key is required to use the chat feature and will be securely stored during your session.
+
 ## Tips for Effective Use
 
 * Use clear and specific questions.

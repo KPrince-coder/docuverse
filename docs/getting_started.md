@@ -28,27 +28,24 @@
 
 ## Configuration
 
-1. Create a `.streamlit/secrets.toml` file with your API keys:
+1. Configure API Key:
+   * Obtain a GROQ API key from [GROQ Console](https://console.groq.com)
+   * Add via sidebar "🔑 API Key Management"
+   * Or add to `.streamlit/secrets.toml`:
 
-    * Obtain a GROQ\_API\_KEY from [https://console.groq.com/](https://console.groq.com/).
-    * Add the key to `.streamlit/secrets.toml`:
+     ```toml
+     GROQ_API_KEY = "your-api-key-here"
+     ```
 
-        ```toml
-        GROQ_API_KEY = "your-api-key-here"
-        ```
+2. Select Model:
+   * Open "🤖 Model Selection" in sidebar
+   * Choose preferred model
+   * Default: mixtral-8x7b-32768
 
-2. Customize the application settings in `.streamlit/config.toml`:
-
-    * Modify the `.streamlit/config.toml` file to customize the application's appearance.
-
-        ```toml
-        [theme]
-        primaryColor = "#4f8cc9"
-        backgroundColor = "#ffffff"
-        secondaryBackgroundColor = "#f0f2f6"
-        textColor = "#262730"
-        font = "sans serif"
-        ```
+3. Start Using:
+   * Upload documents
+   * Select conversation
+   * Begin chatting
 
 ## Running the Application
 

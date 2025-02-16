@@ -58,6 +58,32 @@
         sqlite3 data/database.db "PRAGMA integrity_check;"
         ```
 
+### Model Selection Issues
+
+* **Error**: "Model not available"
+  * Solution: Verify model availability in GROQ console
+  * Try switching to default model (mixtral-8x7b-32768)
+
+* **Error**: "Model initialization failed"
+  * Solution:
+    * Check API key validity
+    * Verify model compatibility
+    * Try restarting the application
+
+### API Key Issues
+
+* **Error**: "Invalid API key"
+  * Solution:
+    * Verify key in GROQ console
+    * Re-enter key in sidebar
+    * Check for copying errors
+
+* **Error**: "API key not found"
+  * Solution:
+    * Enter key in sidebar
+    * Or add to secrets.toml
+    * Restart application if needed
+
 ## Debugging Tips
 
 1. Check Streamlit logs for error messages.
