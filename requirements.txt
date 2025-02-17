@@ -12,3 +12,4 @@ python-pptx>=1.0.2
 streamlit>=1.42.0
 torch>=2.6.0
 transformers>=4.48.3
+backoff>=2.2.1
