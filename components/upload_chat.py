@@ -4,7 +4,7 @@ import threading
 import time
 from datetime import datetime
 
-from components.utils import (
+from .utils import (
     process_uploads,
     rerun_assistant_message,
     delete_chat_message_pair,
