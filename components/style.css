@@ -6,8 +6,6 @@
     background: linear-gradient(90deg, #4facfe, #00f2fe);
     color: white;
     padding: 15px 20px;
-    font-size: 3rem;
-    font-weight: bold;
     text-align: center;
     z-index: 1000;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
@@ -15,8 +13,13 @@
     border-radius: 10px;
 }
 
+.title{
+    font-size: 3rem;
+    font-weight: bold;
+}
+
 .sub-text {
-    font-size: 1.2rem;
+    font-size: 1rem;
 }
 
 /* Chat messages container */
