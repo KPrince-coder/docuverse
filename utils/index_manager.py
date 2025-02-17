@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import logging
 import pickle
@@ -24,6 +25,7 @@ from llama_index.readers.json import JSONReader
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 # ========================
 # EMBEDDING IMPLEMENTATIONS
@@ -58,7 +60,7 @@ class BasicEmbedding(BaseEmbedding):
         return [self._hash_text(text) for text in texts]
 
     def _hash_text(self, text: str) -> List[float]:
-        """Create hash-based embedding vector"""
+        """Create a hash-based embedding vector for quick fallback."""
         import hashlib
 
         hash_obj = hashlib.sha384(text.encode())
@@ -80,13 +82,8 @@ class BasicEmbedding(BaseEmbedding):
         return self._normalize
 
 
-# =================
-# CORE FUNCTIONALITY
-# =================
-
-
 def get_file_metadata(path: str) -> Dict[str, Any]:
-    """Generate metadata for files"""
+    """Generate metadata for a file."""
     stats = os.stat(path)
     ext = os.path.splitext(path)[1][1:].lower()
 
@@ -118,8 +115,13 @@ def get_file_metadata(path: str) -> Dict[str, Any]:
     }
 
 
+# =================
+# CORE FUNCTIONALITY
+# =================
+
+
 class IndexManager:
-    """Main index management class"""
+    """Main index management class with lazy loading and concurrent index building."""
 
     def __init__(self, data_dir: str = "data/uploads", session_id: str = None):
         # Configuration paths
@@ -133,27 +135,27 @@ class IndexManager:
         )
 
         # Model configuration
-        self.model_name = "BAAI/bge-small-en"  # Changed model for better compatibility
+        self.model_name = "BAAI/bge-small-en"  # Updated for better compatibility
         self.embedding_dimension = 384
         self.processed_files = set()
         self.index = None
         self.last_index_time = 0
-        self.index_rebuild_interval = 300  # 5 minutes
+        self.index_rebuild_interval = 300  # Rebuild every 5 minutes
 
-        # Initialize directories
+        # Ensure required directories exist
         for path in [
-            self.session_dir,  # Add session-specific upload directory
+            self.session_dir,
             self.storage_dir,
             self.cache_dir,
             self.models_cache,
         ]:
             Path(path).mkdir(parents=True, exist_ok=True)
 
-        # Initialize components
+        # Initialize embedding model and caches
         self._initialize_embedding_model()
         self._load_caches()
 
-        # Configure global settings
+        # Configure global settings for chunking and embeddings
         Settings.chunk_size = 512  # Smaller chunks for better retrieval
         Settings.chunk_overlap = 50
         Settings.num_output = 1024
@@ -164,13 +166,12 @@ class IndexManager:
         self._processing_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     def _initialize_embedding_model(self):
-        """Initialize embedding model with correct parameters"""
+        """Initialize the embedding model with optimal parameters."""
         try:
-            # Initialize embedding model directly without SentenceTransformer
             self.embed_model = HuggingFaceEmbedding(
                 model_name=self.model_name,
                 cache_folder=self.models_cache,
-                embed_batch_size=64,  # Increased batch size for faster processing
+                embed_batch_size=64,  # Increased batch size for efficiency
             )
             Settings.embed_model = self.embed_model
             logger.info(f"Initialized embedding model: {self.model_name}")
@@ -181,7 +182,7 @@ class IndexManager:
             Settings.embed_model = self.embed_model
 
     def _load_caches(self):
-        """Load cached data"""
+        """Load cached embeddings and index data to speed up processing."""
         self.embedding_cache_file = Path(self.cache_dir) / "embeddings.pkl"
         self.index_cache_file = Path(self.cache_dir) / "index.pkl"
 
@@ -202,7 +203,7 @@ class IndexManager:
             self._embedding_cache = {}
 
     def _save_caches(self):
-        """Persist cached data"""
+        """Persist cached data for faster subsequent loads."""
         try:
             with open(self.embedding_cache_file, "wb") as f:
                 pickle.dump(self._embedding_cache, f)
@@ -215,14 +216,14 @@ class IndexManager:
             logger.error(f"Cache save error: {e}")
 
     def _should_rebuild(self) -> bool:
-        """Determine if index needs rebuilding"""
+        """Determine if the index needs to be rebuilt based on time or file changes."""
         if not self.index:
             return True
 
         if time.time() - self.last_index_time > self.index_rebuild_interval:
             return True
 
-        # Use os.scandir for more efficient file iteration
+        # Use os.scandir for efficient file iteration
         current_files = {
             entry.name: f"{entry.stat().st_size}_{entry.stat().st_mtime}"
             for entry in os.scandir(self.data_dir)
@@ -232,13 +233,13 @@ class IndexManager:
         return current_files != cached_files
 
     def _get_file_hash(self, filename: str) -> str:
-        """Generate quick file hash"""
+        """Generate a quick hash for a file based on its size and modification time."""
         path = os.path.join(self.data_dir, filename)
         stats = os.stat(path)
         return f"{stats.st_size}_{stats.st_mtime}"
 
     def build_index(self, force=False):
-        """Build or rebuild vector index with improved concurrency."""
+        """Build or rebuild the vector index using concurrent file processing."""
         with self._index_build_lock:
             if self._index_build_thread and self._index_build_thread.is_alive():
                 logger.info("Index build already in progress")
@@ -249,20 +250,19 @@ class IndexManager:
                     logger.info("Starting index construction...")
                     if not self.session_id:
                         logger.error("No session_id provided")
-                        return False  # Add return value
+                        return False
 
-                    # Get files for this session from database
+                    # Retrieve files associated with this session via the database
                     from .database import ConversationDB
 
                     db = ConversationDB()
-
                     files = db.get_conversation_files(self.session_id)
 
                     if not files:
                         logger.warning(
                             f"No documents found for session {self.session_id}"
                         )
-                        return False  # Add return value
+                        return False
 
                     logger.info(
                         f"Processing {len(files)} files for session {self.session_id}"
@@ -300,9 +300,8 @@ class IndexManager:
 
                     if not documents:
                         logger.warning("No documents could be processed")
-                        return False  # Add return value
+                        return False
 
-                    # Create index with improved settings
                     logger.info("Creating vector index...")
                     try:
                         storage_context = StorageContext.from_defaults()
@@ -319,11 +318,11 @@ class IndexManager:
                             show_progress=True,
                         )
 
-                        # Persist index
+                        # Persist the index for future sessions
                         storage_context.persist(persist_dir=self.storage_dir)
                         self.last_index_time = time.time()
 
-                        # Update file hash cache
+                        # Update file hash cache to detect future changes
                         current_file_hashes = {
                             entry.name: f"{entry.stat().st_size}_{entry.stat().st_mtime}"
                             for entry in os.scandir(self.data_dir)
@@ -335,7 +334,7 @@ class IndexManager:
                         logger.info(
                             f"Index built with {len(documents)} documents from {processed_count} files"
                         )
-                        return True  # Add return value
+                        return True
                     except Exception as e:
                         logger.error(f"Failed to create index: {e}")
                         return False
@@ -343,12 +342,13 @@ class IndexManager:
                 except Exception as e:
                     logger.error(f"Index build failed: {e}", exc_info=True)
 
+            # Launch index building in a background thread
             self._index_build_thread = threading.Thread(target=_build, daemon=True)
             self._index_build_thread.start()
             return True
 
     def _process_json_file(self, file_path: str):
-        """Handle a single JSON document"""
+        """Process a single JSON document."""
         try:
             reader = JSONReader(levels_back=2, collapse_length=500)
             docs = reader.load_data(file_path)
@@ -361,11 +361,11 @@ class IndexManager:
             return []
 
     def _process_json_files(self):
-        """Handle JSON documents - Deprecated, use _process_json_file instead"""
+        """(Deprecated) Process JSON files."""
         return []
 
     def load_index(self):
-        """Load existing index"""
+        """Load an existing index if available; otherwise, trigger a rebuild."""
         try:
             required_files = ["docstore.json", "vector_store.json"]
             if all((Path(self.storage_dir) / f).exists() for f in required_files):
@@ -382,16 +382,14 @@ class IndexManager:
             self.build_index()
 
     def query_index(self, query: str, top_k: int = 5):
-        """Execute search query with improved concurrency."""
-        # If no index exists, build it synchronously
+        """Execute a search query on the index using a background thread."""
         if not self.index:
             self.build_index()
-        # If index is outdated, rebuild it in background
         elif self._should_rebuild():
             threading.Thread(target=self.build_index, daemon=True).start()
 
         try:
-            # Run embedding and search in thread pool
+
             def _async_query():
                 query_engine = self.index.as_query_engine(
                     similarity_top_k=top_k,
@@ -404,9 +402,10 @@ class IndexManager:
                 return query_engine.query(query)
 
             future = self._processing_pool.submit(_async_query)
-            response = future.result(timeout=30)  # 30 second timeout
+            response = future.result(timeout=30)  # 30-second timeout
             nodes = getattr(response, "source_nodes", [])
 
+            # If scores are available, sort the nodes in descending order
             if nodes and hasattr(nodes[0], "score"):
                 nodes = sorted(
                     nodes, key=lambda x: getattr(x, "score", 0), reverse=True
@@ -420,3 +419,14 @@ class IndexManager:
         except Exception as e:
             logger.error(f"Query failed: {e}")
             return []
+
+    def cleanup(self):
+        """Clean up storage and cache directories."""
+        try:
+            if os.path.exists(self.storage_dir):
+                shutil.rmtree(self.storage_dir)
+            if os.path.exists(self.cache_dir):
+                shutil.rmtree(self.cache_dir)
+            logger.info(f"Cleaned up storage and cache for session {self.session_id}")
+        except Exception as e:
+            logger.error(f"Cleanup failed: {e}")

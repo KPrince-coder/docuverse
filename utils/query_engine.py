@@ -3,6 +3,11 @@ import time
 import concurrent.futures
 import threading
 from typing import List
+import backoff
+from requests.exceptions import RequestException
+from datetime import datetime, timedelta
+from collections import deque
+
 from llama_index.core import Settings
 from llama_index.llms.groq import Groq
 from .index_manager import IndexManager
@@ -41,6 +46,32 @@ Answer:
 """
 
 
+class RateLimiter:
+    def __init__(self, max_requests=10, time_window=60):
+        self.max_requests = max_requests
+        self.time_window = time_window  # in seconds
+        self.requests = deque()
+        self.lock = threading.Lock()
+
+    def can_make_request(self):
+        now = datetime.now()
+        with self.lock:
+            # Remove old requests outside the time window
+            while self.requests and (now - self.requests[0]) > timedelta(
+                seconds=self.time_window
+            ):
+                self.requests.popleft()
+
+            if len(self.requests) < self.max_requests:
+                self.requests.append(now)
+                return True
+            return False
+
+    def wait_for_slot(self):
+        while not self.can_make_request():
+            time.sleep(1)
+
+
 class QueryEngine:
     def __init__(
         self, groq_api_key, session_id: str = None, model: str = "mixtral-8x7b-32768"
@@ -51,13 +82,21 @@ class QueryEngine:
         self.index_manager = IndexManager(session_id=session_id)
         self.initialize_llm(groq_api_key)
         Settings.llm = self.llm
+
+        # Dedicated thread pool for query processing
         self._query_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._response_cache = {}
         self._cache_lock = threading.Lock()
+
+        # Ensure index is loaded/initialized lazily
         self._ensure_index()
 
+        self.rate_limiter = RateLimiter(max_requests=10, time_window=60)
+        self.retries = 3
+        self.retry_delay = 5
+
     def _ensure_index(self):
-        """Ensure index is built or loaded."""
+        """Lazy-load or reload the document index."""
         try:
             if not self.index_manager.index:
                 self.index_manager.load_index()
@@ -67,7 +106,7 @@ class QueryEngine:
             return False
 
     def initialize_llm(self, api_key: str, max_retries: int = 3) -> None:
-        """Initialize the LLM with retries and error handling."""
+        """Initialize the LLM with retries and exponential backoff."""
         retry_count = 0
         last_error = None
 
@@ -88,7 +127,6 @@ class QueryEngine:
                 last_error = str(e)
                 wait_time = min(2**retry_count, 30)  # Cap wait time at 30 seconds
                 logger.warning(f"LLM init attempt {retry_count} failed: {last_error}")
-
                 if retry_count < max_retries:
                     logger.info(f"Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
@@ -120,10 +158,10 @@ class QueryEngine:
 
             sources_seen.add(source)
 
-            # Format this chunk with source
+            # Format this chunk with source information
             chunk = f"\n[From {source}]\n{text}\n---\n"
 
-            # Check if adding this would exceed max length
+            # Check if adding this would exceed max_length
             if current_length + len(chunk) > max_length:
                 # Try to include at least something from every source
                 if len(sources_seen) < len(
@@ -144,15 +182,25 @@ class QueryEngine:
 
         formatted_history = []
         for msg in history[:-1]:  # Exclude current question
-            role = "User" if msg["role"] == "user" else "Assistant"
-            formatted_history.append(f"{role}: {msg['content']}")
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            formatted_history.append(f"{role}: {msg.get('content', '')}")
 
         return "\n".join(formatted_history)
 
+    @backoff.on_exception(
+        backoff.expo,
+        (RequestException, Exception),
+        max_tries=3,
+        max_time=30,
+        giveup=lambda e: "429" in str(e),  # Don't retry on rate limits
+    )
     def query(self, question: str, conversation_history: List[dict] = None) -> str:
-        """Process query with improved concurrency."""
+        """Process query with rate limiting and enhanced error handling."""
         try:
-            # Check cache with thread safety
+            # Wait for rate limit slot
+            self.rate_limiter.wait_for_slot()
+
+            # Use a cache key based on session and question hash
             cache_key = (
                 f"{self.session_id}_{hash(question)}"
                 if self.session_id
@@ -163,58 +211,69 @@ class QueryEngine:
                     return self._response_cache[cache_key]
 
             def _async_query():
-                # Ensure index exists
-                if not self._ensure_index():
-                    return "Failed to initialize document index. Please try refreshing the page."
+                try:
+                    # Ensure the document index is available
+                    if not self._ensure_index():
+                        return "⚠️ Document index initialization failed. Please try refreshing the page."
 
-                # Format conversation history
-                conv_history = self._format_conversation_history(
-                    conversation_history or []
-                )
+                    conv_history = self._format_conversation_history(
+                        conversation_history or []
+                    )
 
-                # Get document context
-                retrieved_nodes = self.index_manager.query_index(question, top_k=5)
-                if not retrieved_nodes:
-                    return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question."
+                    # Retrieve relevant document nodes
+                    retrieved_nodes = self.index_manager.query_index(question, top_k=5)
+                    if not retrieved_nodes:
+                        return (
+                            "I couldn't find any relevant information in the documents. "
+                            "Please try uploading relevant documents or rephrasing your question."
+                        )
 
-                # Format document context
-                doc_context = self._format_context(retrieved_nodes)
+                    doc_context = self._format_context(retrieved_nodes)
 
-                # Build prompt with both contexts
-                prompt = PROMPT_TEMPLATE.format(
-                    conversation_history=conv_history,
-                    context=doc_context,
-                    question=question,
-                )
+                    # Build the prompt using both conversation history and document context
+                    prompt = PROMPT_TEMPLATE.format(
+                        conversation_history=conv_history,
+                        context=doc_context,
+                        question=question,
+                    )
 
-                # Get response from LLM with increased tokens
-                response = self.llm.complete(
-                    prompt,
-                    max_tokens=2000,  # Increased from 1000
-                    temperature=0.3,
-                )
+                    # Get response from the LLM
+                    response = self.llm.complete(
+                        prompt,
+                        max_tokens=2000,  # Increased token limit for detailed responses
+                        temperature=0.3,
+                    )
+                    result = response.text.strip()
+                    return result
 
-                # Cache and return response
-                result = response.text.strip()
-                return result
+                except Exception as e:
+                    error_msg = str(e)
+                    if "503" in error_msg:
+                        return "⚠️ The AI service is temporarily unavailable. Please try again in a few moments."
+                    elif "429" in error_msg:
+                        return "⚠️ Too many requests. Please wait a moment before trying again."
+                    else:
+                        logger.error(f"Query processing error: {error_msg}")
+                        return f"⚠️ An error occurred: {error_msg}"
 
-            # Run query in thread pool
+            # Run the query in the dedicated thread pool
             future = self._query_pool.submit(_async_query)
-            result = future.result(timeout=30)  # 30 second timeout
+            try:
+                result = future.result(timeout=45)  # Increased timeout
+                # Cache successful results
+                if not result.startswith("⚠️"):
+                    with self._cache_lock:
+                        self._response_cache[cache_key] = result
+                return result
+            except concurrent.futures.TimeoutError:
+                return "⚠️ The request took too long. Please try a simpler question or try again later."
 
-            # Cache result with thread safety
-            with self._cache_lock:
-                self._response_cache[cache_key] = result
-            return result
-
-        except concurrent.futures.TimeoutError:
-            return "The request took too long to process. Please try again or try with a simpler question."
         except Exception as e:
-            logger.error(f"Query error: {e}")
-            return "I encountered an error processing your question. Please try again."
+            logger.error(f"Query failed: {str(e)}")
+            return "⚠️ Something went wrong. Please try again in a few moments."
 
     def evaluate_response(self, query: str, response: str, contexts: List[str]) -> dict:
-        """Evaluates the response for faithfulness and relevancy."""
+        """Evaluate the response for relevancy and timeliness."""
         return {
             "query": query,
             "response": response,
