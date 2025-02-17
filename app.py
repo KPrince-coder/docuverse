@@ -11,52 +11,72 @@ from components.notes import render_notes
 from utils.database import ConversationDB
 from utils.query_engine import QueryEngine
 
-# Initialize all session state variables first - MUST BE AT TOP OF FILE
-if "selected_model" not in st.session_state:
-    st.session_state["selected_model"] = "llama-3.1-8b-instant"
-if "query_engines" not in st.session_state:
-    st.session_state["query_engines"] = {}
-if "show_rename" not in st.session_state:
-    st.session_state["show_rename"] = False
-if "manually_renamed" not in st.session_state:
-    st.session_state["manually_renamed"] = set()
-if "api_key" not in st.session_state:
-    st.session_state["api_key"] = st.secrets.get("GROQ_API_KEY", "")
-
-# Configure logging and Streamlit page config
-logging.basicConfig(level=logging.INFO)
-st.set_page_config(
-    page_title="DocuVerse",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="auto",
-    menu_items={
-        "Get Help": "https://github.com/KPrince-coder/docuverse#readme",
-        "Report a bug": "https://github.com/KPrince-coder/docuverse/issues",
-        "About": "# DocuVerse\nYour Document Intelligence Assistant",
-    },
+# Configure logging with a more efficient setup
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%H:%M:%S",
 )
 
 
-# --------------------------------------------------
-# Lazy Loading & ThreadPool Setup
-# --------------------------------------------------
+# Configure page only once
+if "page_config_done" not in st.session_state:
+    st.set_page_config(
+        page_title="DocuVerse",
+        page_icon="📚",
+        layout="wide",
+        initial_sidebar_state="auto",
+        menu_items={
+            "Get Help": "https://github.com/KPrince-coder/docuverse#readme",
+            "Report a bug": "https://github.com/KPrince-coder/docuverse/issues",
+            "About": "# DocuVerse\nYour Document Intelligence Assistant",
+        },
+    )
+    st.session_state["page_config_done"] = True
+
+
+# Cache expensive operations
+@st.cache_resource
+def get_db():
+    return ConversationDB()
+
+
 @st.cache_resource
 def get_executor():
     return ThreadPoolExecutor(max_workers=4)
 
 
-executor = get_executor()
-
-
-@st.cache_data
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def load_css_file():
     with open("components/style.css", "r") as css_file:
         return css_file.read()
 
 
-css_content = load_css_file()
-st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
+# Initialize session state efficiently
+def init_session_state():
+    defaults = {
+        "selected_model": "llama-3.1-8b-instant",
+        "query_engines": {},
+        "show_rename": False,
+        "manually_renamed": set(),
+        "api_key": st.secrets.get("GROQ_API_KEY", ""),
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+# Initialize core components at startup
+init_session_state()
+db = get_db()
+executor = get_executor()
+
+
+# Apply CSS only if not already applied
+if "css_applied" not in st.session_state:
+    css_content = load_css_file()
+    st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
+    st.session_state["css_applied"] = True
 
 # --------------------------------------------------
 # Render the Sticky Header
@@ -139,7 +159,6 @@ os.environ["GROQ_API_KEY"] = st.session_state.api_key
 # --------------------------------------------------
 # Initialize database and query engine container
 # --------------------------------------------------
-db = ConversationDB()
 st.session_state["db"] = db
 
 # --------------------------------------------------
@@ -210,24 +229,38 @@ if st.session_state.get("show_rename") and selected_session_id:
                 st.session_state["show_rename"] = False
                 st.rerun()
 
+
+def safe_cleanup(session_id):
+    """Safely clean up session resources."""
+    try:
+        session_storage = f"./storage/{session_id}"
+        session_cache = f"./cache/{session_id}"
+
+        # Clean storage directory
+        if os.path.exists(session_storage):
+            shutil.rmtree(session_storage)
+
+        # Clean cache directory
+        if os.path.exists(session_cache):
+            shutil.rmtree(session_cache)
+
+        # Clean query engine if it exists
+        if (
+            "query_engines" in st.session_state
+            and session_id in st.session_state["query_engines"]
+        ):
+            del st.session_state["query_engines"][session_id]
+
+        return True
+    except Exception as e:
+        logging.error(f"Error cleaning up session {session_id}: {e}")
+        return False
+
+
 if st.sidebar.button("🎬 Start New Conversation"):
     if selected_session_id:
-        try:
-
-            def cleanup():
-                session_storage = f"./storage/{selected_session_id}"
-                session_cache = f"./cache/{selected_session_id}"
-                if os.path.exists(session_storage):
-                    shutil.rmtree(session_storage)
-                if os.path.exists(session_cache):
-                    shutil.rmtree(session_cache)
-                if selected_session_id in st.session_state["query_engines"]:
-                    del st.session_state["query_engines"][selected_session_id]
-
-            cleanup_future = executor.submit(cleanup)
-            cleanup_future.result()
-        except Exception as e:
-            logging.error(f"Error cleaning up session {selected_session_id}: {e}")
+        cleanup_future = executor.submit(safe_cleanup, selected_session_id)
+        cleanup_future.result()
     selected_session_id = db.create_conversation()
     st.rerun()
 

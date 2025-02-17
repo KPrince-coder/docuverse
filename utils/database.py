@@ -3,20 +3,69 @@ from datetime import datetime
 import os
 import logging
 import threading
+from pathlib import Path
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
 class ConversationDB:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    # def __init__(self, db_path="data/conversations.db"):
+    #     if not hasattr(self, "initialized"):
+    #         self.conn = sqlite3.connect(db_path, check_same_thread=False)
+    #         self.conn.execute("PRAGMA journal_mode=WAL")
+    #         self.conn.execute("PRAGMA synchronous=NORMAL")
+    #         self.conn.execute("PRAGMA cache_size=-2000")  # 2MB cache
+    #         self._lock = threading.Lock()
+    #         self._create_table()
+    #         self.initialized = True
+
     def __init__(self, db_path="data/conversations.db"):
-        # Allow multi-threaded access
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        # Enable Write-Ahead Logging for improved concurrency and performance
-        self.conn.execute("PRAGMA journal_mode=WAL;")
-        # Create a lock to serialize DB access across threads
-        self._lock = threading.Lock()
-        self._create_table()
+        """Initialize the database connection, create necessary directories, and set up the database."""
+
+        # Ensure the directory for the database exists
+        db_directory = Path(db_path).parent
+        if not db_directory.exists():
+            try:
+                db_directory.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created directory: {db_directory}")
+            except OSError as e:
+                logger.error(f"Error creating database directory: {e}")
+                raise
+
+        # Check if already initialized to avoid re-initialization
+        if not hasattr(self, "initialized"):
+            try:
+                # Establish the SQLite database connection
+                self.conn = sqlite3.connect(db_path, check_same_thread=False)
+                # Enable WAL (Write-Ahead Logging) for better concurrency and performance
+                self.conn.execute("PRAGMA journal_mode=WAL")
+                # Set the synchronization mode to normal for better performance
+                self.conn.execute("PRAGMA synchronous=NORMAL")
+                # Set a 2MB cache size for improved performance
+                self.conn.execute("PRAGMA cache_size=-2000")
+
+                # Lock for thread-safety
+                self._lock = threading.Lock()
+
+                # Create the necessary tables
+                self._create_table()
+
+                # Mark the initialization flag
+                self.initialized = True
+            except sqlite3.Error as e:
+                logger.error(f"Error initializing the database: {e}")
+                raise
 
     def _create_table(self):
         with self._lock:

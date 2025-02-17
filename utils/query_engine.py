@@ -7,6 +7,7 @@ import backoff
 from requests.exceptions import RequestException
 from datetime import datetime, timedelta
 from collections import deque
+from functools import lru_cache
 
 from llama_index.core import Settings
 from llama_index.llms.groq import Groq
@@ -14,7 +15,10 @@ from .index_manager import IndexManager
 
 logger = logging.getLogger(__name__)
 
-PROMPT_TEMPLATE = """You are a highly versatile AI assistant designed to interact with documents and maintain an engaging, dynamic conversation. Your goal is to provide tailored responses, engage the user in activities (such as quizzes or games), and be ready for any request based on the documents provided.
+
+@lru_cache(maxsize=1)
+def get_prompt_template():
+    return """You are a highly versatile AI assistant designed to interact with documents and maintain an engaging, dynamic conversation. Your goal is to provide tailored responses, engage the user in activities (such as quizzes or games), and be ready for any request based on the documents provided.
 
 Previous conversation:
 {conversation_history}
@@ -79,27 +83,38 @@ class QueryEngine:
         self.llm = None
         self.session_id = session_id
         self.model = model
-        self.index_manager = IndexManager(session_id=session_id)
+
+        # Initialize core components right away
         self.initialize_llm(groq_api_key)
+        self._cache_lock = threading.Lock()
+        self._response_cache = {}
+        self.rate_limiter = RateLimiter(max_requests=10, time_window=60)
+
+        # Lazy load components
+        self._index_manager = None
+        self._query_pool = None
         Settings.llm = self.llm
 
-        # Dedicated thread pool for query processing
-        self._query_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-        self._response_cache = {}
-        self._cache_lock = threading.Lock()
+    @property
+    def index_manager(self):
+        if self._index_manager is None:
+            self._index_manager = IndexManager(session_id=self.session_id)
+        return self._index_manager
 
-        # Ensure index is loaded/initialized lazily
-        self._ensure_index()
-
-        self.rate_limiter = RateLimiter(max_requests=10, time_window=60)
-        self.retries = 3
-        self.retry_delay = 5
+    @property
+    def query_pool(self):
+        if self._query_pool is None:
+            self._query_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        return self._query_pool
 
     def _ensure_index(self):
         """Lazy-load or reload the document index."""
         try:
             if not self.index_manager.index:
+                logger.info("Building document index...")
                 self.index_manager.load_index()
+                if not self.index_manager.index:
+                    return False
             return True
         except Exception as e:
             logger.error(f"Failed to ensure index: {e}")
@@ -197,8 +212,17 @@ class QueryEngine:
     def query(self, question: str, conversation_history: List[dict] = None) -> str:
         """Process query with rate limiting and enhanced error handling."""
         try:
-            # Wait for rate limit slot
+            if not self.rate_limiter:
+                self.rate_limiter = RateLimiter(max_requests=10, time_window=60)
+
             self.rate_limiter.wait_for_slot()
+
+            # Check index status first
+            if not self.index_manager or not self.index_manager.index:
+                return (
+                    "I'm still processing the documents. Please wait a moment and try your question again. "
+                    "If this persists, try refreshing the page."
+                )
 
             # Use a cache key based on session and question hash
             cache_key = (
@@ -231,7 +255,7 @@ class QueryEngine:
                     doc_context = self._format_context(retrieved_nodes)
 
                     # Build the prompt using both conversation history and document context
-                    prompt = PROMPT_TEMPLATE.format(
+                    prompt = get_prompt_template().format(
                         conversation_history=conv_history,
                         context=doc_context,
                         question=question,
@@ -257,7 +281,7 @@ class QueryEngine:
                         return f"⚠️ An error occurred: {error_msg}"
 
             # Run the query in the dedicated thread pool
-            future = self._query_pool.submit(_async_query)
+            future = self.query_pool.submit(_async_query)
             try:
                 result = future.result(timeout=45)  # Increased timeout
                 # Cache successful results
@@ -268,6 +292,14 @@ class QueryEngine:
             except concurrent.futures.TimeoutError:
                 return "⚠️ The request took too long. Please try a simpler question or try again later."
 
+        except AttributeError as e:
+            if "'NoneType' object has no attribute 'as_query_engine'" in str(e):
+                return (
+                    "I'm currently initializing and indexing your documents. "
+                    "Please give me a moment to finish processing and try your question again."
+                )
+            logger.error(f"Query failed: {str(e)}")
+            return "⚠️ Something went wrong. Please try again in a few moments."
         except Exception as e:
             logger.error(f"Query failed: {str(e)}")
             return "⚠️ Something went wrong. Please try again in a few moments."
