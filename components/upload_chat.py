@@ -31,6 +31,12 @@ SUPPORTED_FILE_TYPES = [
 
 @st.dialog("Save Note")
 def save_note_modal():
+    """Modal dialog for saving notes."""
+    db = st.session_state.get("db")
+    if not db:
+        st.error("Database connection not available")
+        return
+
     note_title = st.text_input(
         "Note Title", value=f"Note {st.session_state.note_to_save['timestamp']}"
     )
@@ -43,6 +49,7 @@ def save_note_modal():
                 st.session_state.note_to_save["assistant"],
                 note_title,
                 file_type,
+                db,  # Pass database instance to the function
             )
             if saved_path:
                 st.success(f"Note saved as {saved_path}")

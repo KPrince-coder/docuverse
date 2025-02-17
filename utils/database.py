@@ -463,6 +463,28 @@ class ConversationDB:
             logger.error(f"Error updating note title: {e}")
             return False
 
+    def update_note_path(self, old_path: str, new_path: str) -> bool:
+        """Update the file path of a note in the database."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                UPDATE notes 
+                SET file_path = ?, 
+                    updated_at = ?
+                WHERE file_path = ?
+                """,
+                (new_path, datetime.now().isoformat(), old_path),
+            )
+            self.conn.commit()
+            success = cursor.rowcount > 0
+            cursor.close()
+            return success
+        except Exception as e:
+            logger.error(f"Failed to update note path: {e}")
+            self.conn.rollback()
+            return False
+
     def close(self):
         """Closes the database connection."""
         with self._lock:
