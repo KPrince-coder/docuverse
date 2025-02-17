@@ -47,7 +47,8 @@ class FileReader:
                 pdf_content.append(content)
             doc.close()
 
-            formatted_content = f"# {title}\n\n{'\n'.join(pdf_content)}"
+            formatted_content = f"# {title}\n\n" + "\n".join(pdf_content)
+
             return formatted_content, None
         except Exception as e:
             logger.error(f"Error reading PDF file {file_path}: {e}")
