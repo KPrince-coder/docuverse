@@ -13,7 +13,7 @@ from utils.query_engine import QueryEngine
 
 # Initialize all session state variables first - MUST BE AT TOP OF FILE
 if "selected_model" not in st.session_state:
-    st.session_state["selected_model"] = "mixtral-8x7b-32768"
+    st.session_state["selected_model"] = "llama-3.1-8b-instant"
 if "query_engines" not in st.session_state:
     st.session_state["query_engines"] = {}
 if "show_rename" not in st.session_state:
@@ -67,13 +67,13 @@ render_header()
 # Define available models
 # --------------------------------------------------
 AVAILABLE_MODELS = [
-    "mixtral-8x7b-32768",  # default
+    "llama-3.1-8b-instant",  # default
+    "mixtral-8x7b-32768",
     "deepseek-r1-distill-llama-70b",
     "llama-3.3-70b-versatile",
     "llama-3.3-70b-specdec",
     "llama-3.2-1b-preview",
     "llama-3.2-3b-preview",
-    "llama-3.1-8b-instant",
     "llama3-70b-8192",
     "llama3-8b-8192",
     "llama-guard-3-8b",

@@ -74,7 +74,7 @@ class RateLimiter:
 
 class QueryEngine:
     def __init__(
-        self, groq_api_key, session_id: str = None, model: str = "mixtral-8x7b-32768"
+        self, groq_api_key, session_id: str = None, model: str = "llama-3.1-8b-instant"
     ):
         self.llm = None
         self.session_id = session_id
