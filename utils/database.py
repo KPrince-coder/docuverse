@@ -8,11 +8,40 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationDB:
+    # def __init__(self, db_path="data/conversations.db"):
+    #     # Allow multi-threaded access
+    #     self.conn = sqlite3.connect(db_path, check_same_thread=False)
+    #     # Enable Write-Ahead Logging for improved concurrency and performance
+    #     self.conn.execute("PRAGMA journal_mode=WAL;")
+    #     self._create_table()
+
     def __init__(self, db_path="data/conversations.db"):
-        # Allow multi-threaded access
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # Ensure the database file exists, or create it if it doesn't
+        if not os.path.exists(db_path):
+            # If the file doesn't exist, create it and setup the necessary table
+            self._create_db(db_path)
+        else:
+            # Allow multi-threaded access
+            self.conn = sqlite3.connect(db_path, check_same_thread=False)
+
         # Enable Write-Ahead Logging for improved concurrency and performance
         self.conn.execute("PRAGMA journal_mode=WAL;")
+
+        # Initialize or create the necessary table
+        self._create_table()
+
+    def _create_db(self, db_path):
+        """Create the database and necessary table if the file doesn't exist."""
+        # Create the parent directories if they don't exist
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+        # Create the database and connection
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+
+        # Enable Write-Ahead Logging for improved concurrency and performance
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+
+        # Now create the necessary table structure
         self._create_table()
 
     def _create_table(self):
