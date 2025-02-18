@@ -10,6 +10,11 @@ DocuVerse is an intelligent document management and analysis platform that allow
 * **Note-taking functionality**: Provides a built-in note-taking feature for users to capture insights and ideas.
 * **Data visualization for CSV files**: Allows users to visualize data from CSV files using charts and graphs.
 
+## Live Demo
+
+* [Streamlit Cloud]<https://docu-verse.streamlit.app/>
+* [Huggingface Space]<https://huggingface.co/spaces/KPrinc/docuverse-app>
+
 ## Documentation
 
 * [Getting Started](docs/getting_started.md): Provides instructions on how to install and configure DocuVerse.
