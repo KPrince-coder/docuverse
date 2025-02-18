@@ -25,7 +25,8 @@ def handle_file_upload(uploaded_file, session_id, db):
                     f.write(chunk)
             return True
         return False
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error in handle_file_upload: {e}")
         return False
 
 
@@ -37,7 +38,11 @@ def process_uploads(files, session_id, db):
             executor.submit(handle_file_upload, f, session_id, db): f for f in files
         }
         for future in futures:
-            results.append(future.result())
+            try:
+                results.append(future.result())
+            except Exception as e:
+                logger.error(f"Error processing upload: {e}")
+                results.append(False)
     # Trigger background indexing so the user can interact immediately.
     query_engine = st.session_state["query_engines"].get(session_id)
     if query_engine:
@@ -75,7 +80,8 @@ def delete_chat_message(session_id, timestamp, db):
         db.conn.commit()
         cur.close()
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error deleting chat message: {e}")
         return False
 
 
@@ -89,7 +95,7 @@ def delete_chat_message_pair(session_id, user_timestamp, assistant_timestamp, db
 def save_note_and_get_path(
     user_question: str, assistant_response: str, note_title: str, file_type: str, db
 ) -> str:
-    """Save a note with proper formatting."""
+    """Save a note with proper formatting and return its file path."""
     try:
         NOTES_DIR = os.path.abspath("data/notes")
         os.makedirs(NOTES_DIR, exist_ok=True)
@@ -98,7 +104,9 @@ def save_note_and_get_path(
         safe_title = "".join(
             c for c in note_title if c.isalnum() or c in (" ", "-", "_")
         ).strip()
-        filename = f"{safe_title}.{file_type}"  # Remove timestamp from filename
+        filename = (
+            f"{safe_title}.{file_type}"  # Using the cleaned title without timestamp
+        )
         file_path = os.path.join(NOTES_DIR, filename)
 
         # Content with proper formatting
@@ -109,7 +117,6 @@ def save_note_and_get_path(
             if file_type == "txt":
                 with open(file_path, "w", encoding="utf-8", newline="\n") as f:
                     f.write(formatted_content)
-
             elif file_type == "pdf":
                 try:
                     from fpdf import FPDF
@@ -119,7 +126,6 @@ def save_note_and_get_path(
 
                     # Title (User Question)
                     pdf.set_font("Arial", "B", size=16)
-                    # Split long titles into multiple lines
                     pdf.multi_cell(0, 10, user_question)
                     pdf.ln(10)
 
@@ -133,7 +139,6 @@ def save_note_and_get_path(
                         "PDF creation requires fpdf2. Please install it with: pip install fpdf2"
                     )
                     return None
-
             elif file_type == "docx":
                 try:
                     from docx import Document
@@ -149,7 +154,7 @@ def save_note_and_get_path(
                     heading_run.font.bold = True
                     heading.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
 
-                    # Add some space
+                    # Add space
                     doc.add_paragraph()
 
                     # Content (Assistant Response)
@@ -164,9 +169,9 @@ def save_note_and_get_path(
                     )
                     return None
 
-            # Add note to database
+            # Add note to database; use the safe title without timestamp
             if db.add_note(
-                title=safe_title,  # Use clean title without timestamp
+                title=safe_title,
                 content=formatted_content,
                 file_path=file_path,
                 file_type=file_type,

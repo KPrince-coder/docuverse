@@ -4,15 +4,15 @@ import os
 import threading
 import time
 
+
 from datetime import datetime
 
-from components.utils import (
+from .utils import (
     process_uploads,
     rerun_assistant_message,
     delete_chat_message_pair,
     save_note_and_get_path,
 )
-
 
 # Supported file types for uploader
 SUPPORTED_FILE_TYPES = [
@@ -32,7 +32,6 @@ SUPPORTED_FILE_TYPES = [
 ]
 
 
-# Define the modal using the st.dialog decorator.
 @st.dialog("Save Note")
 def save_note_modal():
     """Modal dialog for saving notes."""
@@ -84,16 +83,16 @@ def render_upload_chat(session_id, db):
         key=f"uploader_{session_id}",
     )
     if uploaded_files:
-        with st.status("Processing files...") as status:
+        with st.spinner("Processing files..."):
             existing_files = {f[1] for f in db.get_conversation_files(session_id)}
             new_files = [uf for uf in uploaded_files if uf.name not in existing_files]
             if new_files:
                 results = process_uploads(new_files, session_id, db)
                 successful = sum(1 for r in results if r)
                 failed = len(new_files) - successful
-                status.write(f"✅ Processed: {successful} files")
+                st.write(f"✅ Processed: {successful} file(s)")
                 if failed:
-                    status.write(f"❌ Failed: {failed} files")
+                    st.write(f"❌ Failed: {failed} file(s)")
             st.success("Upload Complete")
 
     # Display Uploaded Files Section
@@ -109,6 +108,7 @@ def render_upload_chat(session_id, db):
                 st.text(f"• {file_name}")
             with col2:
                 delete_key = f"delete_{file_path}"
+
 
                 if st.session_state.pending_delete == file_path:
                     confirm_col, cancel_col = st.columns(2)
@@ -148,14 +148,15 @@ def render_upload_chat(session_id, db):
     messages_container = st.container()
     with messages_container:
         st.markdown(
-            '<div id="chat_container" class="chat-messages">', unsafe_allow_html=True
+            '<div id="chat_container" class="chat-messages">',
+            unsafe_allow_html=True,
         )
         messages = db.get_messages(session_id)
         conversation_history = []
         i = 0
         while i < len(messages):
-            # Group a user message with the following assistant message if available.
             role, content, timestamp = messages[i]
+            # Group a user message with the following assistant message if available.
             if (
                 role == "user"
                 and i + 1 < len(messages)
@@ -203,11 +204,19 @@ def render_upload_chat(session_id, db):
                             st.rerun()
                     else:
                         cols[2].empty()
-                conversation_history.append(
-                    {"role": "user", "content": user_msg[1], "timestamp": user_msg[2]}
-                )
-                conversation_history.append(
-                    {"role": "assistant", "content": ai_msg[1], "timestamp": ai_msg[2]}
+                conversation_history.extend(
+                    [
+                        {
+                            "role": "user",
+                            "content": user_msg[1],
+                            "timestamp": user_msg[2],
+                        },
+                        {
+                            "role": "assistant",
+                            "content": ai_msg[1],
+                            "timestamp": ai_msg[2],
+                        },
+                    ]
                 )
                 i += 2
             else:
@@ -242,11 +251,28 @@ def render_upload_chat(session_id, db):
                 st.write(question)
             with st.chat_message("assistant"):
                 with st.spinner("🧠 Thinking..."):
-                    query_engine = st.session_state["query_engines"].get(session_id)
-                    response = query_engine.query(
-                        question, conversation_history=conversation_history
-                    )
-                    st.write(response)
-                    db.add_message(session_id, "user", question)
-                    db.add_message(session_id, "assistant", response)
-                    st.rerun()
+                    try:
+                        query_engine = st.session_state["query_engines"].get(session_id)
+                        if not query_engine:
+                            st.error(
+                                "Chat engine not initialized. Please refresh the page."
+                            )
+                            return
+
+                        response = query_engine.query(
+                            question, conversation_history=conversation_history
+                        )
+
+                        if response.startswith("⚠️"):
+                            st.error(
+                                response[2:]
+                            )  # Remove warning emoji for error display
+                            # Don't save error responses to history
+                            return
+
+                        st.write(response)
+                        db.add_message(session_id, "user", question)
+                        db.add_message(session_id, "assistant", response)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"An error occurred: {str(e)}")

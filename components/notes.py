@@ -17,14 +17,7 @@ class FileReader:
 
     @staticmethod
     def read_txt(file_path: str) -> Tuple[Optional[str], Optional[str]]:
-        """Read content from a text file.
-
-        Args:
-            file_path: Path to the text file
-
-        Returns:
-            Tuple of (content, error_message)
-        """
+        """Read content from a text file."""
         try:
             with open(file_path, "rb") as f:
                 content = f.read().decode("utf-8", errors="replace")
@@ -40,24 +33,22 @@ class FileReader:
             pdf_content = []
             doc = pymupdf.open(file_path)
 
-            # Get the first line as title (which was saved as larger, bold text)
+            # Extract a title from the first page (if available)
             first_page = doc[0]
             title = first_page.get_text(
                 "text", clip=(50, 0, first_page.rect.width - 50, 100)
             ).strip()
 
-            # Get rest of content
             for page in doc:
-                content = page.get_text()
-                # Remove the title from first page content to avoid duplication
-                if page.number == 0:
+                content = page.get_text().strip()
+                # Remove title from first page to avoid duplication
+                if page.number == 0 and title:
                     content = content.replace(title, "", 1)
-                pdf_content.append(content.strip())
-
+                pdf_content.append(content)
             doc.close()
 
-            # Format content with markdown for consistent display
-            formatted_content = f"# {title}\n\n{''.join(pdf_content)}"
+            formatted_content = f"# {title}\n\n" + "\n".join(pdf_content)
+
             return formatted_content, None
         except Exception as e:
             logger.error(f"Error reading PDF file {file_path}: {e}")
@@ -68,14 +59,8 @@ class FileReader:
         """Read content from a DOCX file with proper formatting."""
         try:
             doc = Document(file_path)
-
-            # Extract title from first heading
             title = doc.paragraphs[0].text if doc.paragraphs else ""
-
-            # Get rest of content
             content = "\n".join(p.text for p in doc.paragraphs[1:])
-
-            # Format content with markdown for consistent display
             formatted_content = f"# {title}\n\n{content}"
             return formatted_content, None
         except Exception as e:
@@ -84,22 +69,13 @@ class FileReader:
 
 
 def get_file_content(file_path: str) -> Tuple[Optional[str], Optional[str]]:
-    """Get content from a file based on its extension.
-
-    Args:
-        file_path: Path to the file
-
-    Returns:
-        Tuple of (content, error_message)
-    """
+    """Get content from a file based on its extension."""
     file_extension = os.path.splitext(file_path)[1].lower()
-
     file_handlers = {
         ".txt": FileReader.read_txt,
         ".pdf": FileReader.read_pdf,
         ".docx": FileReader.read_docx,
     }
-
     handler = file_handlers.get(file_extension)
     if handler:
         return handler(file_path)
@@ -109,7 +85,6 @@ def get_file_content(file_path: str) -> Tuple[Optional[str], Optional[str]]:
 def render_notes():
     """Render the Notes tab with improved note management."""
     st.header("📝 Saved Notes")
-
     db = st.session_state.get("db")
     if not db:
         st.error("Database connection not available")
@@ -122,55 +97,44 @@ def render_notes():
         )
         return
 
-    # Track rename and delete states
-    if "note_rename" not in st.session_state:
-        st.session_state.note_rename = {}
-    if "pending_note_deletion" not in st.session_state:
-        st.session_state.pending_note_deletion = None
+    # Ensure state keys exist
+    st.session_state.note_rename = st.session_state.get("note_rename", {})
+    st.session_state.pending_note_deletion = st.session_state.get(
+        "pending_note_deletion", None
+    )
 
     for title, content, file_path, file_type, created_at, conversation_id in notes:
-        # Skip if file doesn't exist anymore
         if not os.path.exists(file_path):
-            # Clean up database entry if file is missing
             db.delete_note(file_path)
             continue
 
         with st.expander(f"📝 {title}.{file_type}", expanded=False):
-            # Note metadata
             created_date = datetime.fromisoformat(created_at).strftime(
                 "%B %d, %Y at %H:%M"
             )
             st.caption(f"Created on {created_date}")
 
-            # Read the actual file content using PyMuPDF or python-docx if needed
-            file_content, error = get_file_content(file_path)
+            with st.spinner("Loading note content..."):
+                file_content, error = get_file_content(file_path)
             if error:
                 st.error(error)
-            else:
-                # Display note content with consistent formatting
-                if file_content:
-                    try:
-                        # Split content into title and body based on markdown formatting
-                        parts = file_content.split("\n\n", 1)
-                        if len(parts) == 2:
-                            title_line, body = parts
-                            # Display title with large, bold formatting
-                            st.markdown(
-                                f"<h2>{title_line.replace('#', '').strip()}</h2>",
-                                unsafe_allow_html=True,
-                            )
-                            # Display body with normal formatting
-                            st.markdown(body)
-                        else:
-                            # Fallback if content doesn't match expected format
-                            st.markdown(file_content)
-                    except Exception as e:
-                        logger.error(f"Error formatting note content: {e}")
+            elif file_content:
+                try:
+                    parts = file_content.split("\n\n", 1)
+                    if len(parts) == 2:
+                        title_line, body = parts
+                        st.markdown(
+                            f"<h2>{title_line.replace('#', '').strip()}</h2>",
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(body)
+                    else:
                         st.markdown(file_content)
+                except Exception as e:
+                    logger.error(f"Error formatting note content: {e}")
+                    st.markdown(file_content)
 
-            # Action buttons in columns
             col1, col2, col3 = st.columns(3)
-
             # Rename functionality
             with col1:
                 if file_path in st.session_state.note_rename:
@@ -224,23 +188,18 @@ def render_notes():
             # Delete functionality with confirmation
             with col3:
                 if st.session_state.pending_note_deletion == file_path:
-                    # Show confirmation buttons
                     confirm_col, cancel_col = st.columns(2)
                     with confirm_col:
                         if st.button(
                             "✓", key=f"confirm_delete_{file_path}", help="Confirm"
                         ):
                             try:
-                                # Delete file from disk first
                                 if os.path.exists(file_path):
                                     os.remove(file_path)
-                                # Then remove from database
                                 if db.delete_note(file_path):
                                     st.success("Note deleted!")
                                     st.session_state.pending_note_deletion = None
-                                    time.sleep(
-                                        0.5
-                                    )  # Brief pause to show success message
+                                    time.sleep(0.5)
                                     st.rerun()
                                 else:
                                     st.error("Failed to delete note from database")

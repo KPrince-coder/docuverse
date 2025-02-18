@@ -27,6 +27,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "backoff>=2.2.1",
     "docx2txt>=0.8",
     "fpdf2>=2.8.2",
     "llama-index>=0.12.16",
