@@ -6,6 +6,7 @@ from typing import List
 from llama_index.core import Settings
 from llama_index.llms.groq import Groq
 from .index_manager import IndexManager
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,11 @@ Answer:
 
 class QueryEngine:
     def __init__(
-        self, groq_api_key, session_id: str = None, model: str = "mixtral-8x7b-32768"
+        self,
+        groq_api_key,
+        session_id: str = None,
+        model: str = "mixtral-8x7b-32768",
+        user_dir: Path = None,
     ):
         self.llm = None
         self.session_id = session_id
@@ -55,6 +60,17 @@ class QueryEngine:
         self._response_cache = {}
         self._cache_lock = threading.Lock()
         self._ensure_index()
+
+        # Add local storage support
+        from components.local_storage import LocalStorageManager
+
+        self.local_storage = LocalStorageManager()
+
+        # Fix session-specific local storage
+        cache_key = f"query_cache_{session_id}" if session_id else "query_cache"
+        stored_cache = self.local_storage.load_data(cache_key)
+        if stored_cache:
+            self._response_cache.update(stored_cache)
 
     def _ensure_index(self):
         """Ensure index is built or loaded."""
@@ -152,15 +168,16 @@ class QueryEngine:
     def query(self, question: str, conversation_history: List[dict] = None) -> str:
         """Process query with improved concurrency."""
         try:
-            # Check cache with thread safety
+            # Use session-specific cache key
             cache_key = (
-                f"{self.session_id}_{hash(question)}"
-                if self.session_id
-                else hash(question)
+                f"query_cache_{self.session_id}" if self.session_id else "query_cache"
             )
+            query_key = f"{hash(question)}"
+
             with self._cache_lock:
-                if cache_key in self._response_cache:
-                    return self._response_cache[cache_key]
+                stored_cache = self.local_storage.load_data(cache_key) or {}
+                if query_key in stored_cache:
+                    return stored_cache[query_key]
 
             def _async_query():
                 # Ensure index exists
@@ -175,7 +192,7 @@ class QueryEngine:
                 # Get document context
                 retrieved_nodes = self.index_manager.query_index(question, top_k=5)
                 if not retrieved_nodes:
-                    return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question."
+                    return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question or rerunning with the rerun button below."
 
                 # Format document context
                 doc_context = self._format_context(retrieved_nodes)
@@ -202,9 +219,11 @@ class QueryEngine:
             future = self._query_pool.submit(_async_query)
             result = future.result(timeout=30)  # 30 second timeout
 
-            # Cache result with thread safety
+            # Update session-specific cache
             with self._cache_lock:
-                self._response_cache[cache_key] = result
+                stored_cache = self.local_storage.load_data(cache_key) or {}
+                stored_cache[query_key] = result
+                self.local_storage.save_data(cache_key, stored_cache)
             return result
 
         except concurrent.futures.TimeoutError:
@@ -212,6 +231,12 @@ class QueryEngine:
         except Exception as e:
             logger.error(f"Query error: {e}")
             return "I encountered an error processing your question. Please try again."
+
+    def cleanup_session(self):
+        """Clean up session-specific resources."""
+        if self.session_id:
+            cache_key = f"query_cache_{self.session_id}"
+            self.local_storage.save_data(cache_key, {})
 
     def evaluate_response(self, query: str, response: str, contexts: List[str]) -> dict:
         """Evaluates the response for faithfulness and relevancy."""

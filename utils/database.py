@@ -57,6 +57,42 @@ class ConversationDB:
                 logger.error(f"Error initializing the database: {e}")
                 raise
 
+        # Initialize local storage
+        from components.local_storage import LocalStorageManager
+
+        self.local_storage = LocalStorageManager()
+
+        # Sync with local storage if available
+        self._sync_with_local_storage()
+
+    def _sync_with_local_storage(self):
+        """Sync database with local storage per session."""
+        try:
+            cursor = self.conn.cursor()
+            # Get all sessions
+            cursor.execute("SELECT session_id FROM conversations")
+            sessions = cursor.fetchall()
+
+            for (session_id,) in sessions:
+                # Load session-specific data
+                notes_key = f"notes_{session_id}"
+                chats_key = f"chats_{session_id}"
+
+                stored_notes = self.local_storage.load_data(notes_key)
+                stored_chats = self.local_storage.load_data(chats_key)
+
+                if stored_notes:
+                    # Merge notes
+                    self._merge_stored_notes(session_id, stored_notes)
+
+                if stored_chats:
+                    # Merge chats
+                    self._merge_stored_chats(session_id, stored_chats)
+
+            cursor.close()
+        except Exception as e:
+            logger.error(f"Error syncing with local storage: {e}")
+
     def _create_table(self):
         with self._lock:
             cursor = self.conn.cursor()
@@ -210,19 +246,33 @@ class ConversationDB:
         return "New Conversation"
 
     def add_message(self, session_id, role, content):
-        """Adds a message to the specified conversation."""
+        """Adds a message with proper session handling."""
         timestamp = datetime.now().isoformat()
-        with self._lock:
-            cursor = self.conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO messages (session_id, role, content, timestamp)
-                VALUES (?, ?, ?, ?)
-                """,
-                (session_id, role, content, timestamp),
-            )
-            self.conn.commit()
-            cursor.close()
+        try:
+            with self._lock:
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO messages (session_id, role, content, timestamp)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (session_id, role, content, timestamp),
+                )
+                self.conn.commit()
+                cursor.close()
+
+                # Update local storage for this session
+                chats_key = f"chats_{session_id}"
+                stored_chats = self.local_storage.load_data(chats_key) or []
+                stored_chats.append(
+                    {"role": role, "content": content, "timestamp": timestamp}
+                )
+                self.local_storage.save_data(chats_key, stored_chats)
+
+            return True
+        except Exception as e:
+            logger.error(f"Error adding message: {e}")
+            return False
 
     def add_file(self, session_id, file_path, file_name):
         """Tracks a file associated with a conversation."""
@@ -332,25 +382,38 @@ class ConversationDB:
         return [(fp, fn) for fp, fn in files if os.path.exists(fp)]
 
     def delete_conversation(self, session_id):
-        """Deletes a conversation, its messages, and associated files."""
-        # Get files to delete
-        files = self.get_conversation_files(session_id)
-        # Delete files from disk
-        for file_path, _ in files:
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception as e:
-                logger.error(f"Error deleting file {file_path}: {e}")
-        with self._lock:
-            cursor = self.conn.cursor()
-            cursor.execute("DELETE FROM files WHERE session_id = ?", (session_id,))
-            cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-            cursor.execute(
-                "DELETE FROM conversations WHERE session_id = ?", (session_id,)
-            )
-            self.conn.commit()
-            cursor.close()
+        """Deletes a conversation and cleans up local storage."""
+        try:
+            # Get files to delete
+            files = self.get_conversation_files(session_id)
+            # Delete files from disk
+            for file_path, _ in files:
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                except Exception as e:
+                    logger.error(f"Error deleting file {file_path}: {e}")
+            with self._lock:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM files WHERE session_id = ?", (session_id,))
+                cursor.execute(
+                    "DELETE FROM messages WHERE session_id = ?", (session_id,)
+                )
+                cursor.execute(
+                    "DELETE FROM conversations WHERE session_id = ?", (session_id,)
+                )
+                self.conn.commit()
+                cursor.close()
+
+            # Clean up local storage
+            self.local_storage.save_data(f"notes_{session_id}", [])
+            self.local_storage.save_data(f"chats_{session_id}", [])
+            self.local_storage.save_data(f"query_cache_{session_id}", {})
+
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting conversation: {e}")
+            return False
 
     def delete_file(self, session_id: str, file_path: str):
         """Deletes a specific file from the database and disk."""
@@ -378,7 +441,7 @@ class ConversationDB:
         file_type: str,
         conversation_id: str = None,
     ):
-        """Add a new note to the database."""
+        """Add a new note to the database and sync to local storage."""
         timestamp = datetime.now().isoformat()
         try:
             with self._lock:
@@ -400,6 +463,11 @@ class ConversationDB:
                 )
                 self.conn.commit()
                 cursor.close()
+
+                # Sync to local storage
+                notes = self.get_notes()
+                self.local_storage.sync_notes(notes)
+
             return True
         except Exception as e:
             logger.error(f"Error adding note: {e}")
