@@ -178,19 +178,28 @@ def render_notes():
                         "New title", value=title, key=f"new_title_{file_path}"
                     )
                     if st.button("Save", key=f"save_rename_{file_path}"):
-                        if db.update_note_title(file_path, new_title):
-                            # Update the file name on disk
+                        try:
+                            # Get new file path
                             new_file_path = os.path.join(
                                 os.path.dirname(file_path), f"{new_title}.{file_type}"
                             )
-                            try:
+
+                            # First update the database
+                            if db.update_note_title(file_path, new_title):
+                                # Then rename the file
                                 os.rename(file_path, new_file_path)
+                                # Update the file path in database
+                                db.update_note_path(file_path, new_file_path)
                                 st.success("Title updated!")
                                 del st.session_state.note_rename[file_path]
+                                time.sleep(0.5)  # Brief pause to show success message
                                 st.rerun()
-                            except Exception as e:
-                                logger.error(f"Error renaming file: {e}")
-                                st.error("Failed to rename file")
+                            else:
+                                st.error("Failed to update note in database")
+                        except Exception as e:
+                            logger.error(f"Error renaming note: {e}")
+                            st.error("Failed to rename note")
+
                     if st.button("Cancel", key=f"cancel_rename_{file_path}"):
                         del st.session_state.note_rename[file_path]
                         st.rerun()
