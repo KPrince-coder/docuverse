@@ -444,32 +444,72 @@ class ConversationDB:
         timestamp = datetime.now().isoformat()
         try:
             with self._lock:
+                # Check if note already exists
                 cursor = self.conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO notes (title, content, file_path, file_type, created_at, updated_at, conversation_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        title,
-                        content,
-                        file_path,
-                        file_type,
-                        timestamp,
-                        timestamp,
-                        conversation_id,
-                    ),
-                )
+                cursor.execute("SELECT id FROM notes WHERE file_path = ?", (file_path,))
+                existing = cursor.fetchone()
+
+                if existing:
+                    # Update existing note
+                    cursor.execute(
+                        """
+                        UPDATE notes 
+                        SET title = ?, content = ?, updated_at = ?
+                        WHERE file_path = ?
+                        """,
+                        (title, content, timestamp, file_path),
+                    )
+                else:
+                    # Insert new note
+                    cursor.execute(
+                        """
+                        INSERT INTO notes (title, content, file_path, file_type, created_at, updated_at, conversation_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            title,
+                            content,
+                            file_path,
+                            file_type,
+                            timestamp,
+                            timestamp,
+                            conversation_id,
+                        ),
+                    )
+
                 self.conn.commit()
                 cursor.close()
 
-                # Sync to local storage
-                notes = self.get_notes()
-                self.local_storage.sync_notes(notes)
+                # Sync with local storage
+                notes_key = f"notes_{conversation_id}" if conversation_id else "notes"
+                stored_notes = self.local_storage.load_data(notes_key) or []
 
-            return True
+                new_note = {
+                    "title": title,
+                    "content": content,
+                    "file_path": file_path,
+                    "file_type": file_type,
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                    "conversation_id": conversation_id,
+                }
+
+                # Update or add the note in stored notes
+                note_found = False
+                for i, note in enumerate(stored_notes):
+                    if note.get("file_path") == file_path:
+                        stored_notes[i] = new_note
+                        note_found = True
+                        break
+
+                if not note_found:
+                    stored_notes.append(new_note)
+
+                self.local_storage.save_data(notes_key, stored_notes)
+                return True
+
         except Exception as e:
-            logger.error(f"Error adding note: {e}")
+            logger.error(f"Error saving note: {e}")
             return False
 
     def get_notes(self):
@@ -501,23 +541,69 @@ class ConversationDB:
             return False
 
     def update_note_title(self, file_path: str, new_title: str):
-        """Update a note's title."""
+        """Update a note's title and sync with local storage."""
+        timestamp = datetime.now().isoformat()
         try:
             with self._lock:
+                # First get the full note details
                 cursor = self.conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT content, file_type, conversation_id, created_at
+                    FROM notes 
+                    WHERE file_path = ?
+                    """,
+                    (file_path,),
+                )
+                result = cursor.fetchone()
+
+                if not result:
+                    logger.error(f"Note not found: {file_path}")
+                    return False
+
+                content, file_type, conversation_id, created_at = result
+
+                # Update the note in database
                 cursor.execute(
                     """
                     UPDATE notes 
                     SET title = ?, updated_at = ?
                     WHERE file_path = ?
                     """,
-                    (new_title, datetime.now().isoformat(), file_path),
+                    (new_title, timestamp, file_path),
                 )
                 self.conn.commit()
+
+                # Update in local storage
+                notes_key = f"notes_{conversation_id}" if conversation_id else "notes"
+                stored_notes = self.local_storage.load_data(notes_key) or []
+
+                # Find and update the note in stored notes
+                for note in stored_notes:
+                    if note.get("file_path") == file_path:
+                        note.update(
+                            {
+                                "title": new_title,
+                                "updated_at": timestamp,
+                                # Preserve other fields
+                                "content": content,
+                                "file_type": file_type,
+                                "created_at": created_at,
+                                "conversation_id": conversation_id,
+                                "file_path": file_path,
+                            }
+                        )
+                        break
+
+                # Save updated notes back to local storage
+                self.local_storage.save_data(notes_key, stored_notes)
                 cursor.close()
-            return True
+                return True
+
         except Exception as e:
             logger.error(f"Error updating note title: {e}")
+            with self._lock:
+                self.conn.rollback()
             return False
 
     def close(self):

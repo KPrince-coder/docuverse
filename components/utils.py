@@ -1,7 +1,9 @@
+from datetime import datetime
 import os
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import time
 import streamlit as st
 from utils.query_engine import QueryEngine
 
@@ -98,17 +100,20 @@ def save_note_and_get_path(
         safe_title = "".join(
             c for c in note_title if c.isalnum() or c in (" ", "-", "_")
         ).strip()
-        filename = f"{safe_title}.{file_type}"  # Remove timestamp from filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{safe_title}_{timestamp}.{file_type}"
         file_path = os.path.join(NOTES_DIR, filename)
 
-        # Content with proper formatting
+        # Format content
         formatted_content = f"""# {user_question}
 {assistant_response}"""
 
+        success = False
         try:
             if file_type == "txt":
                 with open(file_path, "w", encoding="utf-8", newline="\n") as f:
                     f.write(formatted_content)
+                success = True
 
             elif file_type == "pdf":
                 try:
@@ -128,6 +133,7 @@ def save_note_and_get_path(
                     pdf.multi_cell(0, 10, assistant_response)
 
                     pdf.output(file_path)
+                    success = True
                 except ImportError:
                     st.error(
                         "PDF creation requires fpdf2. Please install it with: pip install fpdf2"
@@ -158,25 +164,30 @@ def save_note_and_get_path(
                     content_run.font.size = Pt(12)
 
                     doc.save(file_path)
+                    success = True
                 except ImportError:
                     st.error(
                         "DOCX creation requires python-docx. Please install it with: pip install python-docx"
                     )
                     return None
 
-            # Add note to database
-            if db.add_note(
-                title=safe_title,  # Use clean title without timestamp
-                content=formatted_content,
-                file_path=file_path,
-                file_type=file_type,
-                conversation_id=st.session_state.get("selected_session_id"),
-            ):
-                return file_path
-            else:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                return None
+            if success:
+                # Add to database with retry
+                for attempt in range(3):
+                    if db.add_note(
+                        title=note_title,  # Use original title, not safe_title
+                        content=formatted_content,
+                        file_path=file_path,
+                        file_type=file_type,
+                        conversation_id=st.session_state.get("selected_session_id"),
+                    ):
+                        return file_path
+                    time.sleep(0.5)  # Short delay between retries
+
+            # If we got here, the save failed
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return None
 
         except Exception as e:
             logger.error(f"Error saving note file: {e}")
