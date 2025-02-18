@@ -83,8 +83,9 @@ def render_upload_chat(session_id, db):
         type=SUPPORTED_FILE_TYPES,
         key=f"uploader_{session_id}",
     )
+
     if uploaded_files:
-        with st.status("Processing files...") as status:
+        with st.status("Processing files...", state="running", expanded=True) as status:
             existing_files = {f[1] for f in db.get_conversation_files(session_id)}
             new_files = [uf for uf in uploaded_files if uf.name not in existing_files]
             if new_files:
@@ -95,6 +96,7 @@ def render_upload_chat(session_id, db):
                 if failed:
                     status.write(f"❌ Failed: {failed} files")
             st.success("Upload Complete")
+            status.update(label="Upload Complete", expanded=False, state="complete")
 
     # Display Uploaded Files Section
     files = db.get_conversation_files(session_id)
