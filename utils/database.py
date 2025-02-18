@@ -4,6 +4,7 @@ import os
 import logging
 import threading
 from pathlib import Path
+from .local_storage import LocalStorageManager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -58,8 +59,6 @@ class ConversationDB:
                 raise
 
         # Initialize local storage
-        from components.local_storage import LocalStorageManager
-
         self.local_storage = LocalStorageManager()
 
         # Sync with local storage if available

@@ -7,6 +7,7 @@ from llama_index.core import Settings
 from llama_index.llms.groq import Groq
 from .index_manager import IndexManager
 from pathlib import Path
+from .local_storage import LocalStorageManager
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,6 @@ class QueryEngine:
         self._ensure_index()
 
         # Add local storage support
-        from components.local_storage import LocalStorageManager
-
         self.local_storage = LocalStorageManager()
 
         # Fix session-specific local storage
