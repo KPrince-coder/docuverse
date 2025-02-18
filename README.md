@@ -12,8 +12,8 @@ DocuVerse is an intelligent document management and analysis platform that allow
 
 ## Live Demo
 
-* [Streamlit Cloud]<https://docu-verse.streamlit.app/>
-* [Huggingface Space]<https://huggingface.co/spaces/KPrinc/docuverse-app>
+* [Streamlit Cloud](https://docu-verse.streamlit.app/)
+* [Huggingface Space](https://huggingface.co/spaces/KPrinc/docuverse-app)
 
 ## Documentation
 
