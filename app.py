@@ -50,6 +50,16 @@ AVAILABLE_MODELS = [
 # Sidebar: API Key Management and Model Selection
 st.sidebar.title("📚 DocuVerse")
 
+
+# Function to partially mask the API key
+def mask_api_key(api_key):
+    if not api_key:
+        return ""
+    visible_part = api_key[:4]
+    masked_part = "*" * (len(api_key) - 4)
+    return f"{visible_part}{masked_part}"
+
+
 # Model Selection
 with st.sidebar.expander("🤖 Model Selection", expanded=False):
     if "selected_model" not in st.session_state:
@@ -64,14 +74,14 @@ with st.sidebar.expander("🤖 Model Selection", expanded=False):
 
     if selected_model != st.session_state.selected_model:
         st.session_state.selected_model = selected_model
-        # Clear existing query engines to force reinitialization with new model
         st.session_state["query_engines"] = {}
         st.success(f"Model changed to {selected_model}")
         st.rerun()
 
 # API Key Management section
 with st.sidebar.expander(
-    "🔑 API Key Management", expanded="GROQ_API_KEY" not in st.secrets
+    "🔑 API Key Management",
+    expanded="GROQ_API_KEY" not in st.secrets,
 ):
     if "api_key" not in st.session_state:
         st.session_state.api_key = st.secrets.get("GROQ_API_KEY", "")
@@ -80,10 +90,14 @@ with st.sidebar.expander(
         st.warning("Please enter your GROQ API key to use the chat feature.")
         st.markdown("Get your API key from [GROQ Console](https://console.groq.com)")
 
+    # Display the partially masked API key
+    masked_api_key = mask_api_key(st.session_state.api_key)
+
     # API Key input with password mask
     new_api_key = st.text_input(
         "GROQ API Key",
-        value=st.session_state.api_key,
+        disabled=True if masked_api_key else False,
+        value=masked_api_key,
         type="password",
         help="Enter your GROQ API key to enable chat functionality",
     )
@@ -106,7 +120,7 @@ with st.sidebar.expander(
             st.warning("API key cleared!")
             st.rerun()
 
-# Replace the original API key check with the new session state check
+# Check for API key in session state
 if not st.session_state.get("api_key"):
     st.error("Please add your GROQ API key in the sidebar to use the chat feature.")
     st.stop()
