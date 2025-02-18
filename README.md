@@ -1,4 +1,4 @@
-# DocuVerse
+# 📚 DocuVerse
 
 DocuVerse is an intelligent document management and analysis platform that allows users to interact with their documents through natural language queries. Built with Streamlit, Python, and modern AI technologies, it provides an intuitive interface for document processing, querying, and analysis.
 
