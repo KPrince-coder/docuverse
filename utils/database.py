@@ -21,8 +21,11 @@ class ConversationDB:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, db_path="data/conversations.db"):
+    def __init__(self, user_id: str = None, db_path="data/conversations.db"):
         """Initialize the database connection, create necessary directories, and set up the database."""
+        if not user_id:
+            raise ValueError("user_id is required for database operations")
+        self.user_id = user_id
 
         # Ensure the directory for the database exists
         db_directory = Path(db_path).parent
@@ -64,30 +67,70 @@ class ConversationDB:
         # Sync with local storage if available
         self._sync_with_local_storage()
 
+    def _merge_stored_data(self, session_id: str, data_type: str, stored_data: list):
+        """Merge stored data into database."""
+        try:
+            with self._lock:
+                cursor = self.conn.cursor()
+                if data_type == "chats":
+                    for msg in stored_data:
+                        cursor.execute(
+                            """INSERT OR IGNORE INTO messages 
+                            (user_id, session_id, role, content, timestamp)
+                            VALUES (?, ?, ?, ?, ?)""",
+                            (
+                                self.user_id,
+                                session_id,
+                                msg["role"],
+                                msg["content"],
+                                msg["timestamp"],
+                            ),
+                        )
+                elif data_type == "notes":
+                    for note in stored_data:
+                        cursor.execute(
+                            """INSERT OR IGNORE INTO notes
+                            (user_id, title, content, file_path, file_type, created_at, updated_at, conversation_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                self.user_id,
+                                note["title"],
+                                note["content"],
+                                note["file_path"],
+                                note["file_type"],
+                                note["created_at"],
+                                note["updated_at"],
+                                note.get("conversation_id"),
+                            ),
+                        )
+                self.conn.commit()
+                cursor.close()
+        except Exception as e:
+            logger.error(f"Error merging {data_type}: {e}")
+
     def _sync_with_local_storage(self):
         """Sync database with local storage per session."""
         try:
             cursor = self.conn.cursor()
-            # Get all sessions
-            cursor.execute("SELECT session_id FROM conversations")
+            cursor.execute(
+                "SELECT session_id FROM conversations WHERE user_id = ?",
+                (self.user_id,),
+            )
             sessions = cursor.fetchall()
 
             for (session_id,) in sessions:
-                # Load session-specific data
-                notes_key = f"notes_{session_id}"
-                chats_key = f"chats_{session_id}"
+                # Load session data
+                for data_type in ["notes", "chats", "files"]:
+                    key = f"{data_type}_{session_id}"
+                    stored_data = self.local_storage.load_data(key)
+                    if stored_data:
+                        self._merge_stored_data(session_id, data_type, stored_data)
 
-                stored_notes = self.local_storage.load_data(notes_key)
-                stored_chats = self.local_storage.load_data(chats_key)
-
-                if stored_notes:
-                    # Merge notes
-                    self._merge_stored_notes(session_id, stored_notes)
-
-                if stored_chats:
-                    # Merge chats
-                    self._merge_stored_chats(session_id, stored_chats)
-
+            # Save current sessions to local storage
+            self.local_storage.save_data(
+                "user_sessions",
+                {"user_id": self.user_id, "sessions": [s[0] for s in sessions]},
+            )
             cursor.close()
         except Exception as e:
             logger.error(f"Error syncing with local storage: {e}")
@@ -98,15 +141,18 @@ class ConversationDB:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS conversations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT UNIQUE,
+                    user_id TEXT NOT NULL,
+                    session_id TEXT,
                     name TEXT,
                     created_at TEXT,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    UNIQUE(user_id, session_id)
                 )
             """)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
                     session_id TEXT,
                     role TEXT,
                     content TEXT,
@@ -117,6 +163,7 @@ class ConversationDB:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
                     session_id TEXT,
                     file_path TEXT UNIQUE,
                     file_name TEXT,
@@ -137,6 +184,7 @@ class ConversationDB:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
                     title TEXT,
                     content TEXT,
                     file_path TEXT UNIQUE,
@@ -160,6 +208,10 @@ class ConversationDB:
 
     def create_conversation(self):
         """Creates a new conversation and returns its session ID."""
+        if not self.user_id:
+            logger.error("Cannot create conversation: user_id not set")
+            return None
+
         with self._lock:
             cursor = self.conn.cursor()
             session_id = f"session_{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -167,10 +219,10 @@ class ConversationDB:
             default_name = "New Conversation"
             cursor.execute(
                 """
-                INSERT INTO conversations (session_id, name, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO conversations (user_id, session_id, name, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (session_id, default_name, created_at, created_at),
+                (self.user_id, session_id, default_name, created_at, created_at),
             )
             self.conn.commit()
             cursor.close()
@@ -185,9 +237,9 @@ class ConversationDB:
                     """
                     UPDATE conversations 
                     SET name = ?, updated_at = ?
-                    WHERE session_id = ?
+                    WHERE user_id = ? AND session_id = ?
                     """,
-                    (name, datetime.now().isoformat(), session_id),
+                    (name, datetime.now().isoformat(), self.user_id, session_id),
                 )
                 self.conn.commit()
                 cursor.close()
@@ -201,7 +253,8 @@ class ConversationDB:
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT name FROM conversations WHERE session_id = ?", (session_id,)
+                "SELECT name FROM conversations WHERE user_id = ? AND session_id = ?",
+                (self.user_id, session_id),
             )
             result = cursor.fetchone()
             cursor.close()
@@ -215,10 +268,10 @@ class ConversationDB:
                 """
                 SELECT content 
                 FROM messages 
-                WHERE session_id = ? AND role = 'user' 
+                WHERE user_id = ? AND session_id = ? AND role = 'user' 
                 ORDER BY timestamp ASC LIMIT 1
                 """,
-                (session_id,),
+                (self.user_id, session_id),
             )
             first_message = cursor.fetchone()
             cursor.close()
@@ -252,10 +305,10 @@ class ConversationDB:
                 cursor = self.conn.cursor()
                 cursor.execute(
                     """
-                    INSERT INTO messages (session_id, role, content, timestamp)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO messages (user_id, session_id, role, content, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (session_id, role, content, timestamp),
+                    (self.user_id, session_id, role, content, timestamp),
                 )
                 self.conn.commit()
                 cursor.close()
@@ -285,8 +338,8 @@ class ConversationDB:
             with self._lock:
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    "SELECT COUNT(*) FROM files WHERE session_id = ? AND file_name = ?",
-                    (session_id, file_name),
+                    "SELECT COUNT(*) FROM files WHERE user_id = ? AND session_id = ? AND file_name = ?",
+                    (self.user_id, session_id, file_name),
                 )
                 result = cursor.fetchone()
                 count = result[0] if result and result[0] is not None else 0
@@ -299,10 +352,10 @@ class ConversationDB:
                 timestamp = datetime.now().isoformat()
                 cursor.execute(
                     """
-                    INSERT INTO files (session_id, file_path, file_name, uploaded_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO files (user_id, session_id, file_path, file_name, uploaded_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (session_id, file_path, file_name, timestamp),
+                    (self.user_id, session_id, file_path, file_name, timestamp),
                 )
                 self.conn.commit()
                 cursor.close()
@@ -323,7 +376,11 @@ class ConversationDB:
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT session_id, created_at FROM conversations ORDER BY created_at DESC"
+                """SELECT session_id, created_at 
+                FROM conversations 
+                WHERE user_id = ? 
+                ORDER BY created_at DESC""",
+                (self.user_id,),
             )
             rows = cursor.fetchall()
             cursor.close()
@@ -333,7 +390,8 @@ class ConversationDB:
         """Retrieves all conversations with additional details."""
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT 
                     c.session_id,
                     c.created_at,
@@ -341,11 +399,14 @@ class ConversationDB:
                     COUNT(DISTINCT f.id) as file_count,
                     GROUP_CONCAT(DISTINCT f.file_name) as files
                 FROM conversations c
-                LEFT JOIN messages m ON c.session_id = m.session_id
-                LEFT JOIN files f ON c.session_id = f.session_id
+                LEFT JOIN messages m ON c.user_id = m.user_id AND c.session_id = m.session_id
+                LEFT JOIN files f ON c.user_id = f.user_id AND c.session_id = f.session_id
+                WHERE c.user_id = ?
                 GROUP BY c.session_id
                 ORDER BY c.created_at DESC
-            """)
+            """,
+                (self.user_id,),
+            )
             rows = cursor.fetchall()
             cursor.close()
         return rows
@@ -355,8 +416,8 @@ class ConversationDB:
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT role, content, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp",
-                (session_id,),
+                "SELECT role, content, timestamp FROM messages WHERE user_id = ? AND session_id = ? ORDER BY timestamp",
+                (self.user_id, session_id),
             )
             rows = cursor.fetchall()
             cursor.close()
@@ -370,10 +431,10 @@ class ConversationDB:
                 """
                 SELECT DISTINCT file_path, file_name 
                 FROM files 
-                WHERE session_id = ?
+                WHERE user_id = ? AND session_id = ?
                 ORDER BY uploaded_at
                 """,
-                (session_id,),
+                (self.user_id, session_id),
             )
             files = cursor.fetchall()
             cursor.close()
@@ -394,12 +455,17 @@ class ConversationDB:
                     logger.error(f"Error deleting file {file_path}: {e}")
             with self._lock:
                 cursor = self.conn.cursor()
-                cursor.execute("DELETE FROM files WHERE session_id = ?", (session_id,))
                 cursor.execute(
-                    "DELETE FROM messages WHERE session_id = ?", (session_id,)
+                    "DELETE FROM files WHERE user_id = ? AND session_id = ?",
+                    (self.user_id, session_id),
                 )
                 cursor.execute(
-                    "DELETE FROM conversations WHERE session_id = ?", (session_id,)
+                    "DELETE FROM messages WHERE user_id = ? AND session_id = ?",
+                    (self.user_id, session_id),
+                )
+                cursor.execute(
+                    "DELETE FROM conversations WHERE user_id = ? AND session_id = ?",
+                    (self.user_id, session_id),
                 )
                 self.conn.commit()
                 cursor.close()
@@ -420,8 +486,8 @@ class ConversationDB:
             with self._lock:
                 cursor = self.conn.cursor()
                 cursor.execute(
-                    "DELETE FROM files WHERE session_id = ? AND file_path = ?",
-                    (session_id, file_path),
+                    "DELETE FROM files WHERE user_id = ? AND session_id = ? AND file_path = ?",
+                    (self.user_id, session_id, file_path),
                 )
                 self.conn.commit()
                 cursor.close()
@@ -446,7 +512,13 @@ class ConversationDB:
             with self._lock:
                 # Check if note already exists
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT id FROM notes WHERE file_path = ?", (file_path,))
+                cursor.execute(
+                    "SELECT id FROM notes WHERE user_id = ? AND file_path = ?",
+                    (
+                        self.user_id,
+                        file_path,
+                    ),
+                )
                 existing = cursor.fetchone()
 
                 if existing:
@@ -455,18 +527,19 @@ class ConversationDB:
                         """
                         UPDATE notes 
                         SET title = ?, content = ?, updated_at = ?
-                        WHERE file_path = ?
+                        WHERE user_id = ? AND file_path = ?
                         """,
-                        (title, content, timestamp, file_path),
+                        (title, content, timestamp, self.user_id, file_path),
                     )
                 else:
                     # Insert new note
                     cursor.execute(
                         """
-                        INSERT INTO notes (title, content, file_path, file_type, created_at, updated_at, conversation_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO notes (user_id, title, content, file_path, file_type, created_at, updated_at, conversation_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
+                            self.user_id,
                             title,
                             content,
                             file_path,
@@ -516,11 +589,15 @@ class ConversationDB:
         """Get all notes."""
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT title, content, file_path, file_type, created_at, conversation_id
                 FROM notes
+                WHERE user_id = ?
                 ORDER BY created_at DESC
-            """)
+            """,
+                (self.user_id,),
+            )
             notes = cursor.fetchall()
             cursor.close()
         return notes
@@ -530,7 +607,13 @@ class ConversationDB:
         try:
             with self._lock:
                 cursor = self.conn.cursor()
-                cursor.execute("DELETE FROM notes WHERE file_path = ?", (file_path,))
+                cursor.execute(
+                    "DELETE FROM notes WHERE user_id = ? AND file_path = ?",
+                    (
+                        self.user_id,
+                        file_path,
+                    ),
+                )
                 self.conn.commit()
                 cursor.close()
             return True
@@ -551,9 +634,12 @@ class ConversationDB:
                     """
                     SELECT content, file_type, conversation_id, created_at
                     FROM notes 
-                    WHERE file_path = ?
+                    WHERE user_id = ? AND file_path = ?
                     """,
-                    (file_path,),
+                    (
+                        self.user_id,
+                        file_path,
+                    ),
                 )
                 result = cursor.fetchone()
 
@@ -568,9 +654,9 @@ class ConversationDB:
                     """
                     UPDATE notes 
                     SET title = ?, updated_at = ?
-                    WHERE file_path = ?
+                    WHERE user_id = ? AND file_path = ?
                     """,
-                    (new_title, timestamp, file_path),
+                    (new_title, timestamp, self.user_id, file_path),
                 )
                 self.conn.commit()
 

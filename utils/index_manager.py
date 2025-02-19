@@ -121,12 +121,30 @@ def get_file_metadata(path: str) -> Dict[str, Any]:
 class IndexManager:
     """Main index management class"""
 
-    def __init__(self, data_dir: str = "data/uploads", session_id: str = None):
-        # Configuration paths
-        self.data_dir = data_dir
+    def __init__(
+        self,
+        data_dir: str = "data/uploads",
+        session_id: str = None,
+        user_id: str = None,
+    ):
+        if not user_id or not session_id:
+            raise ValueError(
+                "Both user_id and session_id are required for IndexManager"
+            )
+
+        self.user_id = user_id
         self.session_id = session_id
-        self.storage_dir = f"./storage/{session_id}" if session_id else "./storage"
-        self.cache_dir = f"./cache/{session_id}" if session_id else "./cache"
+
+        # Update paths to include user_id
+        self.storage_dir = (
+            f"./storage/{user_id}/{session_id}"
+            if session_id
+            else f"./storage/{user_id}"
+        )
+        self.cache_dir = (
+            f"./cache/{user_id}/{session_id}" if session_id else f"./cache/{user_id}"
+        )
+        self.data_dir = data_dir
         self.models_cache = os.path.join(os.path.dirname(__file__), "models")
         self.session_dir = (
             os.path.join(data_dir, session_id) if session_id else data_dir
@@ -239,14 +257,26 @@ class IndexManager:
 
     def build_index(self, force=False):
         """Build or rebuild vector index with improved concurrency."""
+        if not self.user_id or not self.session_id:
+            logger.error(
+                f"Cannot build index: user_id={self.user_id}, session_id={self.session_id}"
+            )
+            return False
+
         with self._index_build_lock:
-            if self._index_build_thread and self._index_build_thread.is_alive():
+            if (
+                self._index_build_thread
+                and self._index_build_thread.is_alive()
+                and not force
+            ):
                 logger.info("Index build already in progress")
                 return False
 
             def _build():
                 try:
-                    logger.info("Starting index construction...")
+                    logger.info(
+                        f"Starting index construction for user {self.user_id}, session {self.session_id}"
+                    )
                     if not self.session_id:
                         logger.error("No session_id provided")
                         return False  # Add return value
@@ -254,7 +284,7 @@ class IndexManager:
                     # Get files for this session from database
                     from .database import ConversationDB
 
-                    db = ConversationDB()
+                    db = ConversationDB(user_id=self.user_id)
 
                     files = db.get_conversation_files(self.session_id)
 
@@ -345,6 +375,8 @@ class IndexManager:
 
             self._index_build_thread = threading.Thread(target=_build, daemon=True)
             self._index_build_thread.start()
+            if force:  # Wait for completion if forced
+                self._index_build_thread.join()
             return True
 
     def _process_json_file(self, file_path: str):

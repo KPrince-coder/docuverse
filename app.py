@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import shutil
 import logging
-
+import streamlit.components.v1 as components
 
 from components.header import render_header
 from components.upload_chat import render_upload_chat
@@ -10,6 +10,11 @@ from components.history import render_history
 from components.notes import render_notes
 from utils.database import ConversationDB
 from utils.query_engine import QueryEngine
+from utils.user_manager import UserManager
+from components.local_storage import LocalStorageManager
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Configure logging and Streamlit page config
 logging.basicConfig(level=logging.INFO)
@@ -128,23 +133,116 @@ if not st.session_state.get("api_key"):
 # Set API key from session state
 os.environ["GROQ_API_KEY"] = st.session_state.api_key
 
-# Initialize database and query engine container in session state
-if "query_engines" not in st.session_state:
-    st.session_state["query_engines"] = {}
+# Initialize session state variables
+if "initialized" not in st.session_state:
+    st.session_state.initialized = False
 
-# For conversation renaming flag and manual rename tracking
-if "show_rename" not in st.session_state:
-    st.session_state["show_rename"] = False
-if "manually_renamed" not in st.session_state:
-    st.session_state["manually_renamed"] = set()
+if not st.session_state.initialized:
+    # Initialize user management
+    user_manager = UserManager()
+    user_id = UserManager.get_user_id()
 
-db = ConversationDB()
-# ensure the database instance is available in the session state
-st.session_state["db"] = db
+    if not user_id:
+        st.error("Error initializing user session. Please refresh the page.")
+        st.stop()
+
+    # Initialize local storage and restore data
+    local_storage = LocalStorageManager()
+    stored_data = local_storage.restore_session_data(user_id)
+
+    # Initialize database with user_id
+    db = ConversationDB(user_id=user_id)
+    st.session_state.db = db
+
+    # Restore session state
+    st.session_state.update(
+        {
+            "user_id": user_id,
+            "query_engines": {},
+            "conversations": stored_data["sessions"],
+            "chat_history": stored_data["chats"],
+            "notes": stored_data["notes"],
+            "show_rename": False,
+            "manually_renamed": set(),
+            "initialized": True,
+        }
+    )
+
+    if stored_data["sessions"]:
+        st.session_state.selected_session_id = stored_data["sessions"][0]
+
+
+# Add local storage event handler
+def handle_local_storage_message():
+    if "local_storage_data" not in st.session_state:
+        st.session_state.local_storage_data = {}
+
+    components.html(
+        """
+        <script>
+        window.addEventListener('message', function(e) {
+            if (e.data.type === 'local_storage_data') {
+                window.parent.postMessage({
+                    type: 'streamlit:setComponentValue',
+                    data: {
+                        value: JSON.stringify({
+                            userId: e.data.userId,
+                            key: e.data.key,
+                            data: e.data.data
+                        })
+                    }
+                }, '*');
+            }
+        });
+        </script>
+        """,
+        height=0,
+    )
+
+
+# Initialize local storage handler before any other operations
+handle_local_storage_message()
+
+# Initialize user management before any other operations
+user_manager = UserManager()
+user_id = UserManager.get_user_id()
+
+if not user_id:
+    st.error("Error initializing user session. Please refresh the page.")
+    st.stop()
+
+# Ensure user_id persistence
+if "user_id" not in st.session_state:
+    st.session_state.user_id = user_id
+
+# Initialize database with user_id
+db = ConversationDB(user_id=user_id)
+
+# Restore session state from local storage
+if "session_restored" not in st.session_state:
+    local_storage = LocalStorageManager()
+
+    # Restore conversations
+    conversations = local_storage.load_data("conversations")
+    if conversations:
+        st.session_state.conversations = conversations
+
+    # Restore chat history
+    chat_history = local_storage.load_data("chat_history")
+    if chat_history:
+        st.session_state.chat_history = chat_history
+
+    # Restore selected session
+    selected_session = local_storage.load_data("selected_session")
+    if selected_session:
+        st.session_state.selected_session_id = selected_session
+
+    st.session_state.session_restored = True
 
 # Sidebar: Conversation management
 conversations = db.get_conversations()
 selected_session_id = None
+
 if conversations:
     options = [
         {"id": sid, "name": db.get_conversation_name(sid), "created": created[:10]}
@@ -157,15 +255,50 @@ if conversations:
         key="conversation_selector",
     )
     selected_session_id = options[selected_index]["id"]
+    st.session_state["selected_session_id"] = selected_session_id
+
+# Ensure query engines have user_id
+if (
+    st.session_state.get("selected_session_id")
+    and st.session_state["selected_session_id"] not in st.session_state["query_engines"]
+):
+    try:
+        st.session_state["query_engines"][st.session_state["selected_session_id"]] = (
+            QueryEngine(
+                groq_api_key=os.getenv("GROQ_API_KEY"),
+                session_id=st.session_state["selected_session_id"],
+                model=st.session_state.selected_model,
+                user_id=user_id,
+            )
+        )
+        logger.info(
+            f"Initialized QueryEngine for session {st.session_state['selected_session_id']} with user {user_id}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize QueryEngine: {e}")
+        st.error("Error initializing chat engine. Please try refreshing the page.")
+
+# For conversation renaming flag and manual rename tracking
+if "show_rename" not in st.session_state:
+    st.session_state["show_rename"] = False
+if "manually_renamed" not in st.session_state:
+    st.session_state["manually_renamed"] = set()
+
+# Add user ID to database operations
+db = ConversationDB(user_id=user_id)
+# ensure the database instance is available in the session state
+st.session_state["db"] = db
 
 # Conversation renaming functionality
 if st.sidebar.button("✏️ Rename Conversation", help="Rename conversation"):
     st.session_state["show_rename"] = True
 
-if st.session_state.get("show_rename") and selected_session_id:
+if st.session_state.get("show_rename") and st.session_state.get("selected_session_id"):
     with st.sidebar:
-        current_name = db.get_conversation_name(selected_session_id)
-        suggested_name = db.suggest_conversation_name(selected_session_id)
+        current_name = db.get_conversation_name(st.session_state["selected_session_id"])
+        suggested_name = db.suggest_conversation_name(
+            st.session_state["selected_session_id"]
+        )
         st.markdown("##### Current name:")
         st.code(current_name, language=None)
         if (
@@ -186,9 +319,13 @@ if st.session_state.get("show_rename") and selected_session_id:
         with col1:
             if st.button("Save"):
                 if new_name and new_name != current_name:
-                    db.update_conversation_name(selected_session_id, new_name)
+                    db.update_conversation_name(
+                        st.session_state["selected_session_id"], new_name
+                    )
                     # Mark conversation as manually renamed
-                    st.session_state["manually_renamed"].add(selected_session_id)
+                    st.session_state["manually_renamed"].add(
+                        st.session_state["selected_session_id"]
+                    )
                 st.session_state["show_rename"] = False
                 st.rerun()
         with col2:
@@ -196,28 +333,44 @@ if st.session_state.get("show_rename") and selected_session_id:
                 st.session_state["show_rename"] = False
                 st.rerun()
 
+# Update the "Start New Conversation" button to use session state
 if st.sidebar.button("🎬 Start New Conversation"):
-    if selected_session_id:
+    if st.session_state.get("selected_session_id"):
         try:
-            session_storage = f"./storage/{selected_session_id}"
-            session_cache = f"./cache/{selected_session_id}"
+            session_storage = f"./storage/{st.session_state['selected_session_id']}"
+            session_cache = f"./cache/{st.session_state['selected_session_id']}"
             if os.path.exists(session_storage):
                 shutil.rmtree(session_storage)
             if os.path.exists(session_cache):
                 shutil.rmtree(session_cache)
-            if selected_session_id in st.session_state["query_engines"]:
-                del st.session_state["query_engines"][selected_session_id]
+            if (
+                st.session_state["selected_session_id"]
+                in st.session_state["query_engines"]
+            ):
+                del st.session_state["query_engines"][
+                    st.session_state["selected_session_id"]
+                ]
         except Exception as e:
-            logging.error(f"Error cleaning up session {selected_session_id}: {e}")
-    selected_session_id = db.create_conversation()
+            logging.error(
+                f"Error cleaning up session {st.session_state['selected_session_id']}: {e}"
+            )
+
+    new_session_id = db.create_conversation()
+    st.session_state["selected_session_id"] = new_session_id
     st.rerun()
 
 # Modify the QueryEngine initialization to use the selected model
-if selected_session_id and selected_session_id not in st.session_state["query_engines"]:
-    st.session_state["query_engines"][selected_session_id] = QueryEngine(
-        os.getenv("GROQ_API_KEY"),
-        session_id=selected_session_id,
-        model=st.session_state.selected_model,
+if (
+    st.session_state.get("selected_session_id")
+    and st.session_state["selected_session_id"] not in st.session_state["query_engines"]
+):
+    st.session_state["query_engines"][st.session_state["selected_session_id"]] = (
+        QueryEngine(
+            groq_api_key=os.getenv("GROQ_API_KEY"),
+            session_id=st.session_state["selected_session_id"],
+            model=st.session_state.selected_model,
+            user_id=user_id,  # Add user_id here
+        )
     )
 
 
@@ -237,11 +390,12 @@ def update_conversation_name_if_needed(session_id):
 # Layout: Three tabs for Upload & Chat, History, and Notes
 tab1, tab2, tab3 = st.tabs(["📤 Upload & Chat", "📜 History", "📝 Notes"])
 
+# Update the tab rendering to use session state
 with tab1:
-    render_upload_chat(selected_session_id, db)
+    render_upload_chat(st.session_state.get("selected_session_id"), db)
     # Check for name update after each chat interaction
-    if selected_session_id:
-        update_conversation_name_if_needed(selected_session_id)
+    if st.session_state.get("selected_session_id"):
+        update_conversation_name_if_needed(st.session_state["selected_session_id"])
 
 with tab2:
     render_history(db)

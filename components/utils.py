@@ -40,12 +40,16 @@ def process_uploads(files, session_id, db):
         }
         for future in futures:
             results.append(future.result())
-    # Trigger background indexing so the user can interact immediately.
+
+    # Ensure we have user_id before building index
     query_engine = st.session_state["query_engines"].get(session_id)
-    if query_engine:
-        threading.Thread(
-            target=query_engine.index_manager.build_index, daemon=True
-        ).start()
+    if query_engine and query_engine.user_id and session_id:
+        try:
+            # Build index synchronously for first upload
+            query_engine.index_manager.build_index(force=True)
+        except Exception as e:
+            logger.error(f"Error building index: {e}")
+
     return results
 
 

@@ -2,79 +2,68 @@ import streamlit as st
 import streamlit.components.v1 as components
 import json
 from typing import Dict, Any, Optional
+from utils.user_manager import UserManager
+import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class LocalStorageManager:
     """Manages browser-local storage for user data persistence."""
 
     def __init__(self):
+        self.user_manager = UserManager()
         self._init_local_storage()
 
     def _init_local_storage(self):
-        """Initialize local storage with improved session handling."""
+        """Initialize local storage with user isolation and persistence."""
         components.html(
             """
             <script>
-            // Initialize storage if not exists
-            if (!localStorage.getItem('docuverse_data')) {
-                localStorage.setItem('docuverse_data', JSON.stringify({
-                    sessions: {},
-                    lastSync: Date.now()
-                }));
-            }
+            const LOCAL_STORAGE_KEY = 'docuverse_data';
 
-            // Create communication functions
+            // Handle storage events for real-time sync
+            window.addEventListener('storage', (e) => {
+                if (e.key === LOCAL_STORAGE_KEY) {
+                    const data = JSON.parse(e.newValue || '{}');
+                    window.parent.postMessage({
+                        type: 'local_storage_update',
+                        data: data
+                    }, '*');
+                }
+            });
+
             window.handleLocalStorage = {
-                save: function(key, data) {
+                save: function(key, data, userId) {
                     try {
-                        let store = JSON.parse(localStorage.getItem('docuverse_data'));
-                        if (key.includes('_')) {
-                            // Handle session-specific data
-                            const [type, sessionId] = key.split('_');
-                            if (!store.sessions[sessionId]) {
-                                store.sessions[sessionId] = {};
-                            }
-                            store.sessions[sessionId][type] = data;
+                        let store = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '{}');
+                        if (!store[userId]) store[userId] = {};
+                        
+                        // Handle special keys
+                        if (key === 'user_sessions') {
+                            store[userId].sessions = data.sessions;
                         } else {
-                            // Handle global data
-                            store[key] = data;
+                            store[userId][key] = data;
                         }
-                        localStorage.setItem('docuverse_data', JSON.stringify(store));
+                        
+                        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(store));
                         return true;
                     } catch (e) {
                         console.error('Error saving to localStorage:', e);
                         return false;
                     }
                 },
-                load: function(key) {
+                load: function(key, userId) {
                     try {
-                        let store = JSON.parse(localStorage.getItem('docuverse_data'));
-                        if (key.includes('_')) {
-                            // Handle session-specific data
-                            const [type, sessionId] = key.split('_');
-                            return store.sessions[sessionId]?.[type];
-                        }
-                        return store[key];
+                        const store = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '{}');
+                        const userData = store[userId] || {};
+                        return userData[key];
                     } catch (e) {
                         console.error('Error loading from localStorage:', e);
                         return null;
-                    }
-                },
-                clear: function(sessionId) {
-                    try {
-                        let store = JSON.parse(localStorage.getItem('docuverse_data'));
-                        if (sessionId) {
-                            // Clear session-specific data
-                            delete store.sessions[sessionId];
-                        } else {
-                            // Clear all data
-                            store = { sessions: {}, lastSync: Date.now() };
-                        }
-                        localStorage.setItem('docuverse_data', JSON.stringify(store));
-                        return true;
-                    } catch (e) {
-                        console.error('Error clearing localStorage:', e);
-                        return false;
                     }
                 }
             };
@@ -84,10 +73,11 @@ class LocalStorageManager:
         )
 
     def save_data(self, key: str, data: Any) -> bool:
-        """Save data to local storage."""
+        """Save data with user isolation."""
+        user_id = UserManager.get_user_id()
         js_code = f"""
             const data = {json.dumps(data)};
-            window.handleLocalStorage.save('{key}', data);
+            window.handleLocalStorage.save('{key}', data, '{user_id}');
         """
         try:
             components.html(f"<script>{js_code}</script>", height=0)
@@ -97,12 +87,21 @@ class LocalStorageManager:
             return False
 
     def load_data(self, key: str) -> Optional[Any]:
-        """Load data from local storage."""
+        """Load data with better persistence."""
+        user_id = UserManager.get_user_id()
+
+        # Check session state first
+        state_key = f"{user_id}_{key}"
+        if state_key in st.session_state:
+            return st.session_state[state_key]
+
+        # Try to load from local storage
         js_code = f"""
-            const data = window.handleLocalStorage.load('{key}');
-            if (data) {{
+            const data = window.handleLocalStorage.load('{key}', '{user_id}');
+            if (data !== null) {{
                 window.parent.postMessage({{
                     type: 'local_storage_data',
+                    userId: '{user_id}',
                     key: '{key}',
                     data: data
                 }}, '*');
@@ -110,12 +109,24 @@ class LocalStorageManager:
         """
         try:
             components.html(f"<script>{js_code}</script>", height=0)
-            # Note: This is a placeholder. In practice, you'd need to handle
-            # the postMessage response in the Streamlit frontend
-            return None
+            # Save to session state for future access
+            if data := self._wait_for_data(key, user_id):
+                st.session_state[state_key] = data
+                return data
         except Exception as e:
-            st.error(f"Error loading from local storage: {e}")
-            return None
+            logger.error(f"Error loading from local storage: {e}")
+        return None
+
+    def _wait_for_data(self, key: str, user_id: str, timeout: int = 1) -> Optional[Any]:
+        """Wait for data from local storage."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if hasattr(st.session_state, "_local_storage_data"):
+                data = st.session_state._local_storage_data.get((user_id, key))
+                if data is not None:
+                    return data
+            time.sleep(0.1)
+        return None
 
     def clear_data(self, session_id: Optional[str] = None) -> bool:
         """Clear local storage data."""
@@ -145,3 +156,22 @@ class LocalStorageManager:
         """Sync user settings with local storage."""
         key = f"settings_{session_id}" if session_id else "settings"
         return self.save_data(key, settings)
+
+    def restore_session_data(self, user_id: str) -> dict:
+        """Restore all session data for a user."""
+        stored_data = {"sessions": [], "chats": {}, "notes": {}, "files": {}}
+
+        # Load user sessions
+        sessions_data = self.load_data("user_sessions")
+        if sessions_data and sessions_data.get("user_id") == user_id:
+            stored_data["sessions"] = sessions_data.get("sessions", [])
+
+            # Load data for each session
+            for session_id in stored_data["sessions"]:
+                for data_type in ["chats", "notes", "files"]:
+                    key = f"{data_type}_{session_id}"
+                    data = self.load_data(key)
+                    if data:
+                        stored_data[data_type][session_id] = data
+
+        return stored_data

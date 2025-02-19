@@ -50,11 +50,15 @@ class QueryEngine:
         session_id: str = None,
         model: str = "mixtral-8x7b-32768",
         user_dir: Path = None,
+        user_id: str = None,
     ):
-        self.llm = None
+        if not user_id:
+            raise ValueError("user_id is required for QueryEngine initialization")
+
+        self.user_id = user_id
         self.session_id = session_id
         self.model = model
-        self.index_manager = IndexManager(session_id=session_id)
+        self.index_manager = IndexManager(session_id=session_id, user_id=user_id)
         self.initialize_llm(groq_api_key)
         Settings.llm = self.llm
         self._query_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -166,6 +170,11 @@ class QueryEngine:
 
     def query(self, question: str, conversation_history: List[dict] = None) -> str:
         """Process query with improved concurrency."""
+        if not self.user_id:
+            return (
+                "Error: User session not properly initialized. Please refresh the page."
+            )
+
         try:
             # Use session-specific cache key
             cache_key = (
