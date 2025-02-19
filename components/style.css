@@ -123,6 +123,6 @@
 }
 
 /* ------- IFRAMES THAT COMES WITH LOCALSTORAGE ---------- */
-.st-emotion-cache-5aiyo9:has(.stIFrame){
+.stElementContainer:has(.stIFrame){
     display: none;
 }
