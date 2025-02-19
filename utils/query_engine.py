@@ -191,7 +191,7 @@ class QueryEngine:
                 # Get document context
                 retrieved_nodes = self.index_manager.query_index(question, top_k=5)
                 if not retrieved_nodes:
-                    return "I couldn't find any relevant information in the documents. Please try uploading relevant documents or rephrasing your question or rerunning with the rerun button below."
+                    return "Unfortunately, I couldn't find any relevant information in the current documents. To help me better assist you, please try uploading the correct documents, rephrasing your question, or clicking the 'Rerun' button below to attempt the request again. Thank you!"
 
                 # Format document context
                 doc_context = self._format_context(retrieved_nodes)
