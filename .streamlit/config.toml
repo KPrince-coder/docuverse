@@ -9,7 +9,6 @@ font = "sans serif"  # Clean, modern font
 runOnSave = true  # Turn off automatic rerun on save
 headless = true  # Enable browser UI
 enableCORS = true  # Allow cross-origin requests
-port = 8501# Change the default port if needed
 
 fileWatcherType = "none"
 
