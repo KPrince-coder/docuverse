@@ -121,3 +121,8 @@
     background: white;
     z-index: 100;
 }
+
+/* ------- IFRAMES THAT COMES WITH LOCALSTORAGE ---------- */
+.st-emotion-cache-5aiyo9:has(.stIFrame){
+    display: none;
+}
